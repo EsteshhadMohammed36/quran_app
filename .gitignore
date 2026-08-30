@@ -41,3 +41,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Raw downloaded QUL/quran-assets resource packages (spec section23 step1-2).
+# Large binary datasets re-downloadable from the URLs recorded in
+# resource_manifest / tool/resource_manifest_seed.dart - not committed.
+/raw_resources/

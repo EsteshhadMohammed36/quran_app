@@ -61,6 +61,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^3.0.0
+  archive: ^4.2.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -73,10 +74,13 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  # --- Section 23: Data Ingestion Pipeline ---
+  # Pre-built, pre-populated SQLite database (surahs/ayahs/words/mushaf_lines
+  # + resource_manifest) produced by `tool/ingest_quran_data.dart` from the
+  # QUL resources in raw_resources/. AppDatabase copies this to the app's
+  # documents directory on first run instead of ingesting on-device.
+  assets:
+    - assets/database/quran.db
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware
