@@ -98,6 +98,10 @@ Future<void> main(List<String> args) async {
       '${surahNamesRaw.length} surah name entries.',
     );
 
+    print('Verifying word glyph text byte-for-byte against source...');
+    _verifyWordBytesMatchSource(scriptDb.path, wordRows);
+    print('Word glyph text verified byte-for-byte against source.');
+
     print('Transforming to canonical schema (spec §23.1)...');
     final List<Map<String, Object?>> surahs = _buildSurahs(surahNamesRaw);
     final List<Map<String, Object?>> words = _buildWords(wordRows);
@@ -192,8 +196,18 @@ File _extractSingleEntry({
 // ---------------------------------------------------------------------------
 
 List<Map<String, dynamic>> _querySqliteJson(String dbPath, String sql) {
-  final ProcessResult result =
-      Process.runSync('sqlite3', [dbPath, '-json', sql]);
+  // stdoutEncoding must be explicit: Process.runSync defaults to the
+  // platform's system encoding (on Windows, an ANSI codepage, not UTF-8),
+  // which would decode sqlite3's UTF-8 JSON output one byte at a time and
+  // silently corrupt any multi-byte character - including every Quran
+  // glyph in `words.text` (CLAUDE.md rule #1: never transform Quran text,
+  // not even by accident in a helper function).
+  final ProcessResult result = Process.runSync(
+    'sqlite3',
+    [dbPath, '-json', sql],
+    stdoutEncoding: utf8,
+    stderrEncoding: utf8,
+  );
   if (result.exitCode != 0) {
     _fail('sqlite3 query failed on $dbPath:\n$sql\n${result.stderr}');
   }
@@ -223,6 +237,56 @@ Future<void> _runSqliteScript(String dbPath, String sql) async {
   if (stderrText.trim().isNotEmpty) {
     _fail('sqlite3 reported errors writing $dbPath:\n$stderrText');
   }
+}
+
+// ---------------------------------------------------------------------------
+// Byte-level source integrity check (CLAUDE.md rule #1)
+// ---------------------------------------------------------------------------
+
+/// Independently re-reads every word's glyph text from the source db as hex
+/// (pure ASCII, immune to any text-encoding mishandling) and compares it
+/// against what [wordRows] holds in memory. Catches any transcoding bug
+/// (e.g. a process/stream not decoded as UTF-8) that row-count or structural
+/// checks can't see, since those would still pass even if every character
+/// were silently mangled.
+void _verifyWordBytesMatchSource(
+  String scriptDbPath,
+  List<Map<String, dynamic>> wordRows,
+) {
+  final List<Map<String, dynamic>> hexRows = _querySqliteJson(
+    scriptDbPath,
+    'SELECT id, hex(text) AS hex_text FROM words ORDER BY id;',
+  );
+  if (hexRows.length != wordRows.length) {
+    _fail(
+      'Byte-integrity check setup mismatch: ${hexRows.length} hex rows vs '
+      '${wordRows.length} word rows.',
+    );
+  }
+  for (int i = 0; i < wordRows.length; i++) {
+    final int id = wordRows[i]['id'] as int;
+    final int hexId = hexRows[i]['id'] as int;
+    if (id != hexId) {
+      _fail('Byte-integrity check row order mismatch at index $i: $id vs $hexId.');
+    }
+    final String expectedHex = (hexRows[i]['hex_text'] as String).toUpperCase();
+    final String actualHex = _hexOfUtf8(wordRows[i]['text'] as String);
+    if (actualHex != expectedHex) {
+      _fail(
+        'Word id=$id glyph text does not match source byte-for-byte '
+        '(CLAUDE.md rule #1). In-memory hex=$actualHex, source hex=$expectedHex.',
+      );
+    }
+  }
+}
+
+String _hexOfUtf8(String s) {
+  final bytes = utf8.encode(s);
+  final buf = StringBuffer();
+  for (final b in bytes) {
+    buf.write(b.toRadixString(16).padLeft(2, '0').toUpperCase());
+  }
+  return buf.toString();
 }
 
 // ---------------------------------------------------------------------------
