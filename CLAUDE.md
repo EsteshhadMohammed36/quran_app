@@ -54,7 +54,7 @@ QUL/SQLite rows directly. State management: Provider (spec §17.1).
 - [ ] Phase 0 — Mushaf prototype validated (spec §25)
 - [ ] Phase 1 — Project structure + SQLite schema + resource manifest
   - [x] Project structure (`lib/core/*`, `lib/features/*/{data,domain,presentation}`) + deps (`provider`, `sqflite`, `path_provider`, `path`)
-  - [ ] SQLite schema (§15 tables + §15.1 indexes) — next step
+  - [x] SQLite schema (§15 tables + §15.1 indexes) — `lib/core/database/schema.dart` + `app_database.dart`
   - [ ] Resource manifest bookkeeping (§16)
   - [ ] QUL resource download instructions
   - [ ] Ingestion pipeline (populate the schema above from quran-assets/QUL — must not transform Quran text, rule #1)
