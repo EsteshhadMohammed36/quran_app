@@ -7,12 +7,12 @@ plugins {
 android {
     namespace = "com.example.quran_app"
     compileSdk = flutter.compileSdkVersion
-    // Pinned instead of `flutter.ndkVersion`: this Flutter SDK's default NDK
-    // version isn't published on Google's servers, so `flutter.ndkVersion`
-    // fails to download. Pinned to an NDK already present locally
-    // (D:\Android\sdk\ndk) — no native (C/C++) code is used by this project
-    // as of Prompt 3, so the exact NDK version doesn't matter functionally.
-    ndkVersion = "27.0.12077973"
+    // Was pinned to 27.0.12077973 because Flutter's default NDK version
+    // wasn't available locally at the time (see git history). NDK
+    // 28.2.13676358 (Flutter's actual default) is now installed locally and
+    // is what sqflite/jni-using plugins require, so just use Flutter's
+    // default instead of re-pinning to a version that will go stale again.
+    ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
