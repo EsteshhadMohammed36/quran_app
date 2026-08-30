@@ -166,6 +166,10 @@ CREATE TABLE audio_segments (
 
 /// `resource_manifest` — Version/license/source tracking. Key: `resource_id`.
 /// Mandatory for every imported dataset (§16, §27) — no exceptions.
+/// `attribution_text` is not in the §16 column list verbatim but is
+/// required by §27 ("Record attribution text required by the
+/// provider/resource") — added here since this table has no data yet and
+/// this is the cheapest point to include it.
 const String createResourceManifestTable = '''
 CREATE TABLE resource_manifest (
   resource_id TEXT PRIMARY KEY,
@@ -180,7 +184,8 @@ CREATE TABLE resource_manifest (
   sha256 TEXT,
   target_table_or_asset_path TEXT,
   compatibility_group TEXT,
-  status TEXT
+  status TEXT,
+  attribution_text TEXT
 );
 ''';
 

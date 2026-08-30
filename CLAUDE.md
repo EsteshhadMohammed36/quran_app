@@ -55,7 +55,7 @@ QUL/SQLite rows directly. State management: Provider (spec §17.1).
 - [ ] Phase 1 — Project structure + SQLite schema + resource manifest
   - [x] Project structure (`lib/core/*`, `lib/features/*/{data,domain,presentation}`) + deps (`provider`, `sqflite`, `path_provider`, `path`)
   - [x] SQLite schema (§15 tables + §15.1 indexes) — `lib/core/database/schema.dart` + `app_database.dart`
-  - [ ] Resource manifest bookkeeping (§16)
+  - [x] Resource manifest bookkeeping (§16, §27) — `lib/core/resource_manifest/{resource_manifest_entry,resource_manifest_repository,sqlite_resource_manifest_repository}.dart`; `resource_manifest` table gained an `attribution_text` column (§27) not in the §16 list verbatim
   - [ ] QUL resource download instructions
   - [ ] Ingestion pipeline (populate the schema above from quran-assets/QUL — must not transform Quran text, rule #1)
 - [ ] Phase 2 — Ayah selection, context sheet, tafsir, morphology, audio
