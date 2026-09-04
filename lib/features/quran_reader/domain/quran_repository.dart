@@ -21,4 +21,14 @@ abstract class QuranRepository {
   /// real reader must know this to page/lazy-load across the whole Mushaf
   /// without assuming a hardcoded page count).
   Future<int> getPageCount();
+
+  /// Which Mushaf page each of [wordIndexes] is drawn on — needed to pick
+  /// the right per-page QCF font for a word outside the normal page
+  /// renderer (spec §7), e.g. the Ayah Context Sheet's own ayah text.
+  /// `words.page_number` itself isn't populated (spec §23 ingestion gap),
+  /// so this resolves it the same authoritative way [getPage] does: via
+  /// `mushaf_lines`' own `first_word_id`/`last_word_id` ranges. A single
+  /// ayah's words can resolve to *two different* pages for a page-boundary
+  /// ayah (spec §26 "Page boundary") — never assumed to be one page.
+  Future<Map<int, int>> getPageNumbersForWordIndexes(List<int> wordIndexes);
 }

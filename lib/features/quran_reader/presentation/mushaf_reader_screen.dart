@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../ayah_study/presentation/ayah_context_sheet.dart';
 import '../data/sqlite_quran_repository.dart';
 import '../domain/mushaf_page.dart';
 import '../domain/quran_repository.dart';
@@ -8,19 +9,20 @@ import 'mushaf_page_view.dart';
 import 'quran_reader_provider.dart';
 
 /// The real Mushaf reader (Prompt 9: full 604-page navigation + ayah
-/// selection / hit testing — spec §9, §17.1, §21). Supersedes
-/// [MushafPrototypeScreen] now that the renderer is validated on all 4
-/// required pages (spec §25, CLAUDE.md rule #5 — "any other feature" can
-/// now be built on top of it).
+/// selection/hit testing; Prompt 10: the Ayah Context Sheet — spec §9,
+/// §10, §17.1, §21). Supersedes [MushafPrototypeScreen] now that the
+/// renderer is validated on all 4 required pages (spec §25, CLAUDE.md
+/// rule #5 — "any other feature" can now be built on top of it).
 ///
 /// Swipes across every page the installed layout has (not a hardcoded 604 —
 /// see [QuranRepository.getPageCount]), lazily loading + caching only a
 /// small window of nearby pages (rule #6 / spec §21, see
-/// [QuranReaderProvider]). Tapping any word resolves its `surah:ayah` and
-/// highlights the whole ayah (rule #3). The ayah context sheet itself is a
-/// later prompt — for now a tapped ayah just gets highlighted; tapping
-/// elsewhere does nothing yet (spec §9.1's "outside tap dismisses" is tied
-/// to the sheet's own UX rules, not built yet).
+/// [QuranReaderProvider]). Tapping any word resolves its `surah:ayah`,
+/// highlights the whole ayah (rule #3), and opens [AyahContextSheet] as a
+/// persistent (non-modal) `Scaffold.bottomSheet` — the Mushaf page stays
+/// visible/tappable around it, matching spec §10. Tapping elsewhere on
+/// the page (or the sheet's own close button) dismisses the selection and
+/// closes the sheet (spec §9.1 "Outside tap").
 class MushafReaderScreen extends StatefulWidget {
   const MushafReaderScreen({super.key, this.initialPage = 1});
 
@@ -91,12 +93,21 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
 
     return ChangeNotifierProvider<QuranReaderProvider>.value(
       value: provider,
-      child: Scaffold(
-        body: SafeArea(
-          child: _ReaderPageView(
-            pageController: pageController,
-            totalPages: provider.totalPages,
+      child: Consumer<QuranReaderProvider>(
+        builder: (context, readerProvider, _) => Scaffold(
+          body: SafeArea(
+            child: _ReaderPageView(
+              pageController: pageController,
+              totalPages: provider.totalPages,
+            ),
           ),
+          // A persistent (non-modal) sheet, not showModalBottomSheet: spec
+          // §10 wants the Mushaf page to stay visible and tappable around
+          // it (e.g. tapping a different ayah while the sheet is open),
+          // which a modal barrier would block.
+          bottomSheet: readerProvider.isAyahSheetOpen
+              ? AyahContextSheet(repository: _repository)
+              : null,
         ),
       ),
     );
@@ -177,6 +188,7 @@ class _LazyPageState extends State<_LazyPage> {
           page: page,
           selectedAyahKey: provider.selectedAyahKey,
           onWordTap: provider.selectWord,
+          onBackgroundTap: provider.clearSelection,
         );
       },
     );

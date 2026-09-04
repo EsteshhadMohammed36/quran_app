@@ -6,6 +6,11 @@ import '../domain/mushaf_page.dart';
 import '../domain/quran_repository.dart';
 import '../domain/word.dart';
 
+/// The Ayah Context Sheet's study tabs (spec §10: "Meaning, Morphology,
+/// Grammar, Qiraat (future)"). Qiraat has no tab content at all yet — it's
+/// listed in the UI as a future placeholder, not a selectable tab.
+enum StudyTab { meaning, morphology, grammar }
+
 /// App state for the Mushaf reader (spec §17.1 `QuranReaderProvider`):
 /// which page is showing, which ayah is selected, and a small lazily
 /// loaded page cache.
@@ -41,6 +46,23 @@ class QuranReaderProvider extends ChangeNotifier {
 
   String? _selectedAyahKey;
   String? get selectedAyahKey => _selectedAyahKey;
+
+  /// spec §17.1 `isAyahSheetOpen` / `activeStudyTab`. The sheet's open
+  /// state tracks selection 1:1 for now (opening = selecting an ayah,
+  /// closing = clearing it) — the state table in spec §9.1 never
+  /// describes an ayah staying selected on the page with the sheet
+  /// hidden, so there's no third state to model yet.
+  bool _isAyahSheetOpen = false;
+  bool get isAyahSheetOpen => _isAyahSheetOpen;
+
+  StudyTab _activeStudyTab = StudyTab.meaning;
+  StudyTab get activeStudyTab => _activeStudyTab;
+
+  void setActiveStudyTab(StudyTab tab) {
+    if (_activeStudyTab == tab) return;
+    _activeStudyTab = tab;
+    notifyListeners();
+  }
 
   final Map<int, MushafPage> _pageCache = {};
   final Map<int, Future<MushafPage>> _inFlight = {};
@@ -94,18 +116,27 @@ class QuranReaderProvider extends ChangeNotifier {
     );
   }
 
-  /// Rule #3 / spec §9: tapping any word resolves to `surah:ayah` and
-  /// selects/highlights the *whole* ayah, never just the tapped word.
+  /// Rule #3 / spec §9: tapping any word resolves to `surah:ayah`,
+  /// selects/highlights the *whole* ayah (never just the tapped word),
+  /// then opens the ayah context sheet (spec §9's flow ends with "...
+  /// -> open Ayah Context Sheet"). Tapping a *different* ayah while the
+  /// sheet is already open updates the selection in place and leaves the
+  /// sheet open (spec §9.1 "Different ayah tapped"), keeping whichever
+  /// study tab was already active rather than resetting it.
   void selectWord(Word word) {
     final ayahKey = word.ayahKey;
-    if (_selectedAyahKey == ayahKey) return;
+    if (_selectedAyahKey == ayahKey && _isAyahSheetOpen) return;
     _selectedAyahKey = ayahKey;
+    _isAyahSheetOpen = true;
     notifyListeners();
   }
 
+  /// spec §9.1 "Outside tap": dismiss the selection and close the sheet.
   void clearSelection() {
-    if (_selectedAyahKey == null) return;
+    if (_selectedAyahKey == null && !_isAyahSheetOpen) return;
     _selectedAyahKey = null;
+    _isAyahSheetOpen = false;
+    _activeStudyTab = StudyTab.meaning;
     notifyListeners();
   }
 }

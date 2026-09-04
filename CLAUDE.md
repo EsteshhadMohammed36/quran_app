@@ -119,6 +119,64 @@ QUL/SQLite rows directly. State management: Provider (spec §17.1).
     between ayahs, and forward page navigation (RTL swipe: drag left-to-
     right advances page 1→2, matching real Mushaf page-turning).
     `flutter analyze`/`flutter test`: clean.
+  - [x] Ayah Context Sheet (Prompt 10, spec §10) — new `AyahContextSheet`
+    (`lib/features/ayah_study/presentation/`, a new feature per §17's
+    architecture tree, depending on `quran_reader`'s domain/provider —
+    the reverse dependency would be wrong) opens as a persistent
+    `Scaffold.bottomSheet` (not `showModalBottomSheet` — spec §10 needs
+    the Mushaf page to stay visible/tappable *around* it, which a modal
+    barrier would block) whenever `QuranReaderProvider.isAyahSheetOpen`
+    is true, which `selectWord`/`clearSelection` now toggle alongside
+    `selectedAyahKey` (spec §9's flow ends with "... -> open Ayah Context
+    Sheet"; §9.1 "Different ayah tapped" keeps the sheet open and its
+    active tab unchanged, only resetting to the Meaning tab once the
+    sheet fully closes). Shows the real surah name/ayah number/ayah text
+    and a Meaning/Morphology/Grammar tab row (Qiraat shown per spec §10
+    but disabled — it's explicitly "(future)" there) — tab bodies and the
+    Tafsir/Note/Bookmark/Continue actions + audio row are non-blocking
+    "not available yet" placeholders (spec §20), since those are later
+    prompts (11-14), not this one.
+    Two things came up while building this that weren't in the original
+    plan for this prompt:
+    - Rendering the selected ayah's own text needed each word's *page*
+      number to pick that page's QCF font (spec §7) — a page-boundary
+      ayah (spec §26) can have words from two different page fonts.
+      Found `words.page_number` is actually always NULL in the shipped
+      `quran.db` (an ingestion gap from Prompt 6, unnoticed until now
+      since nothing had read that column before). Rather than touch the
+      ingestion pipeline/regenerate the database (extra care territory,
+      CLAUDE.md's own rule), added
+      `QuranRepository.getPageNumbersForWordIndexes()`, which derives it
+      at read time from `mushaf_lines`' own `first_word_id`/`last_word_id`
+      ranges — the same authoritative source `getPage()` already uses,
+      just queried in the other direction. `words.page_number` itself is
+      still unpopulated dead weight in the schema; worth fixing at the
+      source in a later ingestion pass, not urgent now that reads don't
+      depend on it.
+    - Prompt 9 had deliberately deferred "tap outside dismisses" (spec
+      §9.1) to this prompt, planning to add a second, outer
+      `GestureDetector` around the per-word `TapGestureRecognizer`s
+      already shipped. Realized before writing it that two independent
+      tap recognizers overlapping the same point don't reliably suppress
+      one another in Flutter's gesture arena (nested detectors can both
+      fire) — a real risk once a page needed both "tap a word selects"
+      and "tap elsewhere dismisses" at once. Replaced the per-word
+      recognizers with a single page-level `GestureDetector.onTapUp` in
+      `MushafPageView` that does its own hit testing (a `GlobalKey` per
+      ayah line's `Text.rich` + `RenderBox.globalToLocal` + a throwaway
+      `TextPainter.getPositionForOffset`, mapped back to a word via each
+      word's precomputed character range) — one recognizer total, so
+      there's no arena conflict to reason about. Rendering is unaffected
+      (same `TextSpan` builder feeds both the visible `Text.rich` and the
+      hit-test `TextPainter`, so they can't drift apart).
+    Visually verified on the Pixel 6 API 34 emulator: sheet opens on tap
+    with correct surah/ayah/ayah-text (including correct calligraphy,
+    confirming the page-number-lookup fix works), tab switching, tapping
+    a *different* ayah while the sheet is open updates it in place and
+    keeps the active tab (not reset to Meaning), the sheet's close button
+    dismisses, and tapping a non-ayah area (the surah-header banner)
+    while an ayah is selected also dismisses. `flutter analyze`/
+    `flutter test`: clean.
 - [ ] Phase 3 — Bookmarks/notes/last-read, performance, validation suite
 
 ## Version control
