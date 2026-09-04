@@ -10,6 +10,11 @@ import 'package:flutter/material.dart';
 const Color mushafPageColor = Color(0xFFFFFEF8);
 const Color mushafInkColor = Color(0xFF1A1005);
 
+/// Background wash painted behind a selected ayah's words (spec §9: tapping
+/// any word highlights the *whole* ayah). A soft warm gold, translucent
+/// enough not to fight the ink on the warm-white page.
+const Color mushafAyahHighlightColor = Color(0x33C9A227);
+
 ThemeData buildMushafTheme() {
   return ThemeData(
     useMaterial3: true,

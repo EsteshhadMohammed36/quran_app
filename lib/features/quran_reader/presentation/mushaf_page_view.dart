@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../shared/theme/mushaf_theme.dart';
 import '../domain/mushaf_line.dart';
 import '../domain/mushaf_page.dart';
+import '../domain/word.dart';
 import 'qpc_v2_fonts.dart';
 import 'surah_header_ligatures.dart';
 
@@ -17,10 +18,83 @@ import 'surah_header_ligatures.dart';
 class MushafPageView extends StatelessWidget {
   final MushafPage page;
 
-  const MushafPageView({super.key, required this.page});
+  /// `surah:ayah` of the currently selected ayah, or `null` if none is
+  /// selected. Every word belonging to it gets highlighted (rule #3: ayah
+  /// selection is semantic, never word-level).
+  final String? selectedAyahKey;
+
+  /// Called with the tapped [Word] (spec §9: tap -> resolve word ->
+  /// resolve `surah:ayah` -> select the whole ayah). `null` (the default)
+  /// makes the page non-interactive, e.g. for [MushafPrototypeScreen]
+  /// which only needs to validate rendering, not hit testing.
+  final ValueChanged<Word>? onWordTap;
+
+  /// Called when a tap lands somewhere on the page that isn't a word —
+  /// blank margins, the surah-header banner, a basmallah line, or the gap
+  /// between two words (spec §9.1 "Outside tap -> dismiss selection").
+  final VoidCallback? onBackgroundTap;
+
+  const MushafPageView({
+    super.key,
+    required this.page,
+    this.selectedAyahKey,
+    this.onWordTap,
+    this.onBackgroundTap,
+  });
 
   @override
   Widget build(BuildContext context) {
+    // One GlobalKey per *ayah* line (null for basmallah/surah_name), so a
+    // single page-level tap handler can measure exactly which line (if
+    // any) was tapped and resolve the word within it via _wordAt below.
+    //
+    // Deliberately ONE GestureDetector for the whole page rather than a
+    // TapGestureRecognizer per word: Flutter's gesture arena does not
+    // automatically suppress a second, independent tap recognizer that
+    // also contains the same point (nested GestureDetectors/TextSpan
+    // recognizers sharing a point can both fire) — a real risk once this
+    // widget also needs "tap elsewhere clears selection" (spec §9.1)
+    // alongside per-word selection. A single detector doing its own hit
+    // testing sidesteps that arena-conflict class of bug entirely.
+    final List<GlobalKey?> ayahTextKeys = [
+      for (final line in page.lines)
+        line.lineType == MushafLineType.ayah ? GlobalKey() : null,
+    ];
+
+    void handleTapUp(TapUpDetails details) {
+      for (var i = 0; i < page.lines.length; i++) {
+        final key = ayahTextKeys[i];
+        if (key == null) continue;
+        final renderObject = key.currentContext?.findRenderObject();
+        if (renderObject is! RenderBox || !renderObject.attached) continue;
+
+        final local = renderObject.globalToLocal(details.globalPosition);
+        final withinBounds =
+            local.dx >= 0 &&
+            local.dy >= 0 &&
+            local.dx <= renderObject.size.width &&
+            local.dy <= renderObject.size.height;
+        if (!withinBounds) continue;
+
+        final line = page.lines[i];
+        final word = _wordAt(
+          context: context,
+          words: line.words,
+          fontFamily: fontFamilyForPage(line.pageNumber),
+          localPosition: local,
+        );
+        if (word != null) {
+          onWordTap?.call(word);
+        } else {
+          onBackgroundTap?.call();
+        }
+        return;
+      }
+      // Tap didn't land inside any ayah line's text box at all (margins,
+      // a surah_name banner, a basmallah line, ...).
+      onBackgroundTap?.call();
+    }
+
     // Every page fills the full page surface and spaces lines evenly
     // across it (Expanded per line), matching how an ordinary printed
     // Mushaf page always fills its physical height regardless of how many
@@ -50,19 +124,32 @@ class MushafPageView extends StatelessWidget {
     // many lines its own page happens to have.
     return Directionality(
       textDirection: TextDirection.rtl,
-      child: Column(
-        mainAxisSize: MainAxisSize.max,
-        children: [
-          for (final line in page.lines)
-            line.lineType == MushafLineType.surahName
-                ? SizedBox(
-                    height: _surahNameRowHeight(context),
-                    child: _MushafLineView(line: line),
-                  )
-                : Expanded(
-                    flex: line.lineType == MushafLineType.surahName ? 13 : 10,
-                    child: _MushafLineView(line: line)),
-        ],
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: (onWordTap == null && onBackgroundTap == null)
+            ? null
+            : handleTapUp,
+        child: Column(
+          mainAxisSize: MainAxisSize.max,
+          children: [
+            for (var i = 0; i < page.lines.length; i++)
+              page.lines[i].lineType == MushafLineType.surahName
+                  ? SizedBox(
+                      height: _surahNameRowHeight(context),
+                      child: _MushafLineView(line: page.lines[i]),
+                    )
+                  : Expanded(
+                      flex: page.lines[i].lineType == MushafLineType.surahName
+                          ? 13
+                          : 10,
+                      child: _MushafLineView(
+                        line: page.lines[i],
+                        selectedAyahKey: selectedAyahKey,
+                        textKey: ayahTextKeys[i],
+                      ),
+                    ),
+          ],
+        ),
       ),
     );
   }
@@ -82,8 +169,17 @@ class MushafPageView extends StatelessWidget {
 
 class _MushafLineView extends StatelessWidget {
   final MushafLine line;
+  final String? selectedAyahKey;
 
-  const _MushafLineView({required this.line});
+  /// Attached to the ayah-line [Text.rich] only, so [MushafPageView]'s
+  /// single tap handler can locate this exact render box for hit testing.
+  final GlobalKey? textKey;
+
+  const _MushafLineView({
+    required this.line,
+    this.selectedAyahKey,
+    this.textKey,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -92,17 +188,23 @@ class _MushafLineView extends StatelessWidget {
 
     switch (line.lineType) {
       case MushafLineType.ayah:
-        // Plain-space join of unmodified word glyph strings — concatenation
-        // only, matching how ayahs.text_uthmani was built (rule #1: no
-        // character-level transformation).
-        final text = line.words.map((w) => w.text).join(' ');
-        content = Text(
-          text,
-          style: TextStyle(
-            fontFamily: pageFontFamily,
-            fontSize: 28,
-            height: 1.0,
-            color: mushafInkColor,
+        // Per-word spans joined by a plain space, same unmodified word
+        // glyph strings concatenation as before (rule #1: no
+        // character-level transformation of the Quran text itself) — only
+        // now built as separate spans so each word can carry its own
+        // highlight, instead of one opaque Text blob. Splitting into
+        // same-style spans doesn't change the rendered glyphs: QCF words
+        // are already fully composed per-word artwork joined by a literal
+        // space, with no cross-word shaping/kerning to preserve. Tap
+        // resolution itself happens one level up (MushafPageView._wordAt),
+        // not via a recognizer on these spans — see that class's doc
+        // comment for why.
+        content = Text.rich(
+          key: textKey,
+          _buildAyahSpan(
+            words: line.words,
+            baseStyle: _ayahTextStyle(pageFontFamily),
+            selectedAyahKey: selectedAyahKey,
           ),
           maxLines: 1,
           softWrap: false,
@@ -289,4 +391,100 @@ class _MushafLineView extends StatelessWidget {
       ),
     );
   }
+}
+
+TextStyle _ayahTextStyle(String? fontFamily) => TextStyle(
+  fontFamily: fontFamily,
+  fontSize: 28,
+  height: 1.0,
+  color: mushafInkColor,
+);
+
+/// Builds one ayah line's words as a single [TextSpan] tree, one child span
+/// per word (highlighted if it belongs to [selectedAyahKey]) joined by
+/// plain-space spans. Used both to *render* the line (via [Text.rich]) and,
+/// with the exact same word/style layout, to *hit-test* it in
+/// [MushafPageView._wordAt] — sharing this one builder guarantees the two
+/// never drift apart.
+TextSpan _buildAyahSpan({
+  required List<Word> words,
+  required TextStyle baseStyle,
+  required String? selectedAyahKey,
+}) {
+  final children = <InlineSpan>[];
+  for (var i = 0; i < words.length; i++) {
+    final word = words[i];
+    final isSelected = word.ayahKey == selectedAyahKey;
+    children.add(
+      TextSpan(
+        text: word.text,
+        style: isSelected
+            ? baseStyle.copyWith(backgroundColor: mushafAyahHighlightColor)
+            : baseStyle,
+      ),
+    );
+    if (i != words.length - 1) {
+      children.add(TextSpan(text: ' ', style: baseStyle));
+    }
+  }
+  return TextSpan(children: children);
+}
+
+/// One word's character range within the joined text [_buildAyahSpan]
+/// produces (the exact same words + single-space joins), used to map a
+/// tapped character offset back to a [Word].
+class _WordSpan {
+  final Word word;
+  final int start;
+  final int end; // exclusive
+  const _WordSpan(this.word, this.start, this.end);
+}
+
+List<_WordSpan> _computeWordSpans(List<Word> words) {
+  final spans = <_WordSpan>[];
+  int offset = 0;
+  for (var i = 0; i < words.length; i++) {
+    final word = words[i];
+    final start = offset;
+    final end = start + word.text.length;
+    spans.add(_WordSpan(word, start, end));
+    offset = end + (i != words.length - 1 ? 1 : 0); // +1 for the joining space
+  }
+  return spans;
+}
+
+/// Resolves which [Word] (if any) sits at [localPosition] within an ayah
+/// line, by laying out the exact same [TextSpan] [_MushafLineView] rendered
+/// (same words/style/constraints) in a throwaway [TextPainter] and mapping
+/// the tapped point to a character offset, then to a word via
+/// [_computeWordSpans]. Returns `null` for a tap in the joining space
+/// between two words, or past either end of the line's own text — spec
+/// §9.1 treats those as an "outside tap" (dismiss), not a word selection.
+Word? _wordAt({
+  required BuildContext context,
+  required List<Word> words,
+  required String? fontFamily,
+  required Offset localPosition,
+}) {
+  final baseStyle = _ayahTextStyle(fontFamily);
+  final span = _buildAyahSpan(
+    words: words,
+    baseStyle: baseStyle,
+    selectedAyahKey: null,
+  );
+  final painter = TextPainter(
+    text: span,
+    textDirection: TextDirection.rtl,
+    maxLines: 1,
+    textScaler: MediaQuery.textScalerOf(context),
+  )..layout();
+
+  final charOffset = painter.getPositionForOffset(localPosition).offset;
+  final wordSpans = _computeWordSpans(words);
+  for (final wordSpan in wordSpans) {
+    if (charOffset >= wordSpan.start && charOffset < wordSpan.end) {
+      return wordSpan.word;
+    }
+  }
+  return null;
 }

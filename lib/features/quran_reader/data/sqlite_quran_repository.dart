@@ -71,6 +71,51 @@ class SqliteQuranRepository implements QuranRepository {
   }
 
   @override
+  Future<int> getPageCount() async {
+    final db = await _appDatabase.database;
+    final rows = await db.rawQuery(
+      'SELECT MAX(page_number) AS max_page FROM mushaf_lines',
+    );
+    final maxPage = rows.first['max_page'] as int?;
+    if (maxPage == null) {
+      throw StateError('mushaf_lines is empty; cannot determine page count.');
+    }
+    return maxPage;
+  }
+
+  @override
+  Future<Map<int, int>> getPageNumbersForWordIndexes(
+    List<int> wordIndexes,
+  ) async {
+    if (wordIndexes.isEmpty) return {};
+    final db = await _appDatabase.database;
+    final minIndex = wordIndexes.reduce((a, b) => a < b ? a : b);
+    final maxIndex = wordIndexes.reduce((a, b) => a > b ? a : b);
+    // Only ayah-type lines carry first_word_id/last_word_id ranges
+    // (basmallah/surah_name lines don't reference `words` at all).
+    final rows = await db.query(
+      'mushaf_lines',
+      columns: ['page_number', 'first_word_id', 'last_word_id'],
+      where:
+          "line_type = 'ayah' AND last_word_id >= ? AND first_word_id <= ?",
+      whereArgs: [minIndex, maxIndex],
+    );
+
+    final result = <int, int>{};
+    for (final wordIndex in wordIndexes) {
+      for (final row in rows) {
+        final first = row['first_word_id'] as int;
+        final last = row['last_word_id'] as int;
+        if (wordIndex >= first && wordIndex <= last) {
+          result[wordIndex] = row['page_number'] as int;
+          break;
+        }
+      }
+    }
+    return result;
+  }
+
+  @override
   Future<MushafPage> getPage(int pageNumber) async {
     final db = await _appDatabase.database;
 
