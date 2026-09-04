@@ -13,12 +13,17 @@ import 'package:quran_app/core/resource_manifest/resource_manifest_entry.dart';
 /// reviewable record of exactly what was selected and verified, so that
 /// step doesn't depend on chat history.
 ///
-/// Downloaded by the user into `raw_resources/` (git-ignored — see
-/// .gitignore): the first 3 on 2026-08-30 (Prompt 5), the 4th
-/// (surah names) also on 2026-08-30 but during Prompt 6, once the ingestion
-/// step found `surahs.name_arabic` had no source among the first 3 files.
-/// Checksums below were computed against the actual downloaded files, not
-/// copied from anywhere.
+/// Downloaded into `raw_resources/` (git-ignored — see .gitignore): the
+/// first 3 on 2026-08-30 (Prompt 5), the 4th (surah names) also on
+/// 2026-08-30 but during Prompt 6, once the ingestion step found
+/// `surahs.name_arabic` had no source among the first 3 files, and the 5th
+/// (surah header font) on 2026-08-31 during the Mushaf prototype step,
+/// once surah_name lines turned out to need real Mushaf calligraphy that
+/// neither the page fonts nor plain system text could give. The first 4
+/// needed the user to download them manually (QUL gates those downloads
+/// behind login); the 5th's font file is served from a public CDN with no
+/// login wall, so this chat downloaded it directly. Checksums below were
+/// computed against the actual downloaded files, not copied from anywhere.
 ///
 /// Status is `pending`, not `active`: per spec §27, every resource must be
 /// checked against its own terms/license page before production
@@ -118,6 +123,33 @@ const List<ResourceManifestEntry> phase0ResourceManifestSeed = [
     attributionText:
         'Surah names — Quranic Universal Library (qul.tarteel.ai), '
         'Quran Metadata resource.',
+  ),
+
+  // --- Surah header font (spec section6 "Surah names" role) --------------
+  // Neither the QCFxxx page fonts nor plain system text can give
+  // surah_name lines real Mushaf-style calligraphy: the page fonts only
+  // map presentation-form word-glyph codepoints, not ordinary Arabic
+  // letters. This is a dedicated QUL font with one decorative ligature per
+  // surah (user's explicit request, 2026-08-31 — "same font as the
+  // ayahs" turned out to need its own dedicated resource, not reuse of
+  // the page fonts).
+  ResourceManifestEntry(
+    resourceId: 'qul-surah-header-font',
+    resourceName: 'Surah header font',
+    provider: 'QUL',
+    category: 'font',
+    sourceUrl: 'https://qul.tarteel.ai/resources/font/458',
+    downloadFormat: 'ttf',
+    versionOrRevision: 'file dated 2026-01-05 (per CDN Last-Modified header)',
+    licenseOrTermsUrl: 'https://www.tarteel.ai/terms',
+    sha256:
+        'de261a309bdd42262e1a268d5ead56b6ea8366cd59124baedea3903561d7370b',
+    targetTableOrAssetPath: 'assets/fonts/surah_header/',
+    compatibilityGroup: 'madinah-v2-qpc-v2-hafs',
+    status: ResourceManifestStatus.pending,
+    attributionText:
+        'Surah header font (QCF_SurahHeader_COLOR) — Quranic Universal '
+        'Library (qul.tarteel.ai).',
   ),
 ];
 

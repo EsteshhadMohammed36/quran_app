@@ -46,3 +46,9 @@ app.*.map.json
 # Large binary datasets re-downloadable from the URLs recorded in
 # resource_manifest / tool/resource_manifest_seed.dart - not committed.
 /raw_resources/
+# Widget Preview related
+.widget_preview/
+
+# Local Claude Code session/runtime state (launch config, scheduler locks) -
+# machine-specific, not project source.
+/.claude/
