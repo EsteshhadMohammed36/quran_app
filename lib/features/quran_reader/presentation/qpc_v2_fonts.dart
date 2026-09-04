@@ -1,17 +1,13 @@
+import 'qpc_v2_font_families.g.dart';
+
 /// QPC V2 is a page-specific font: every Mushaf page ships its own font
-/// file and its own font-family name (spec §7). Family names below were
-/// read from each bundled file's actual 'name' table, not guessed
-/// (tool/ was used to inspect them directly) — they follow the pattern
-/// `QCF2{page:03d}`, but this map only covers what's actually declared as
-/// a Flutter font asset in pubspec.yaml, and is meant to stay that way:
-/// only the 4 spec §25 prototype pages are bundled so far (CLAUDE.md
-/// rule #5 — don't scale past the validated prototype).
-const Map<int, String> qpcV2FontFamilyByPage = {
-  1: 'QCF2001',
-  300: 'QCF2300',
-  601: 'QCF2601',
-  604: 'QCF2604',
-};
+/// file and its own font-family name (spec §7). Family names were read
+/// from each of the 604 bundled files' actual 'name' table, not guessed —
+/// see tool/extract_qpc_v2_fonts.dart, which produced both the bundled
+/// font assets and [generatedQpcV2FontFamilyByPage]. The section §25
+/// prototype validated the renderer on 4 sample pages before this map
+/// covered all 604 (CLAUDE.md rule #5).
+const Map<int, String> qpcV2FontFamilyByPage = generatedQpcV2FontFamilyByPage;
 
 /// `mushaf_lines` basmallah rows carry no first_word_id/last_word_id, so
 /// there is no per-page word data for them, and no page font has a working

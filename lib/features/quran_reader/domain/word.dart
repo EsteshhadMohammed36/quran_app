@@ -21,6 +21,11 @@ class Word {
     required this.text,
   });
 
+  /// The `surah:ayah` identifier this word belongs to (spec §9: tapping
+  /// any word resolves to this, then selects/highlights the whole ayah —
+  /// never just the tapped word).
+  String get ayahKey => '$surahId:$ayahNumber';
+
   factory Word.fromMap(Map<String, Object?> map) {
     return Word(
       surahId: map['surah_id'] as int,

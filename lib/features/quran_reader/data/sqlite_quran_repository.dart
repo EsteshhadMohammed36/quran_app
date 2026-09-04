@@ -71,6 +71,19 @@ class SqliteQuranRepository implements QuranRepository {
   }
 
   @override
+  Future<int> getPageCount() async {
+    final db = await _appDatabase.database;
+    final rows = await db.rawQuery(
+      'SELECT MAX(page_number) AS max_page FROM mushaf_lines',
+    );
+    final maxPage = rows.first['max_page'] as int?;
+    if (maxPage == null) {
+      throw StateError('mushaf_lines is empty; cannot determine page count.');
+    }
+    return maxPage;
+  }
+
+  @override
   Future<MushafPage> getPage(int pageNumber) async {
     final db = await _appDatabase.database;
 

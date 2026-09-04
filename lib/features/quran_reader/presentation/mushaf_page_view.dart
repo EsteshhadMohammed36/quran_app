@@ -1,8 +1,10 @@
+import 'package:flutter/gestures.dart' show TapGestureRecognizer;
 import 'package:flutter/material.dart';
 
 import '../../../shared/theme/mushaf_theme.dart';
 import '../domain/mushaf_line.dart';
 import '../domain/mushaf_page.dart';
+import '../domain/word.dart';
 import 'qpc_v2_fonts.dart';
 import 'surah_header_ligatures.dart';
 
@@ -17,7 +19,23 @@ import 'surah_header_ligatures.dart';
 class MushafPageView extends StatelessWidget {
   final MushafPage page;
 
-  const MushafPageView({super.key, required this.page});
+  /// `surah:ayah` of the currently selected ayah, or `null` if none is
+  /// selected. Every word belonging to it gets highlighted (rule #3: ayah
+  /// selection is semantic, never word-level).
+  final String? selectedAyahKey;
+
+  /// Called with the tapped [Word] (spec §9: tap -> resolve word ->
+  /// resolve `surah:ayah` -> select the whole ayah). `null` (the default)
+  /// makes ayah lines non-interactive, e.g. for [MushafPrototypeScreen]
+  /// which only needs to validate rendering, not hit testing.
+  final ValueChanged<Word>? onWordTap;
+
+  const MushafPageView({
+    super.key,
+    required this.page,
+    this.selectedAyahKey,
+    this.onWordTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -61,7 +79,11 @@ class MushafPageView extends StatelessWidget {
                   )
                 : Expanded(
                     flex: line.lineType == MushafLineType.surahName ? 13 : 10,
-                    child: _MushafLineView(line: line)),
+                    child: _MushafLineView(
+                      line: line,
+                      selectedAyahKey: selectedAyahKey,
+                      onWordTap: onWordTap,
+                    )),
         ],
       ),
     );
@@ -82,8 +104,14 @@ class MushafPageView extends StatelessWidget {
 
 class _MushafLineView extends StatelessWidget {
   final MushafLine line;
+  final String? selectedAyahKey;
+  final ValueChanged<Word>? onWordTap;
 
-  const _MushafLineView({required this.line});
+  const _MushafLineView({
+    required this.line,
+    this.selectedAyahKey,
+    this.onWordTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -92,20 +120,19 @@ class _MushafLineView extends StatelessWidget {
 
     switch (line.lineType) {
       case MushafLineType.ayah:
-        // Plain-space join of unmodified word glyph strings — concatenation
-        // only, matching how ayahs.text_uthmani was built (rule #1: no
-        // character-level transformation).
-        final text = line.words.map((w) => w.text).join(' ');
-        content = Text(
-          text,
-          style: TextStyle(
-            fontFamily: pageFontFamily,
-            fontSize: 28,
-            height: 1.0,
-            color: mushafInkColor,
-          ),
-          maxLines: 1,
-          softWrap: false,
+        // Per-word spans joined by a plain space, same unmodified word
+        // glyph strings concatenation as before (rule #1: no
+        // character-level transformation of the Quran text itself) — only
+        // now built as separate spans so each word can carry its own tap
+        // target and highlight, instead of one opaque Text blob. Splitting
+        // into same-style spans doesn't change the rendered glyphs: QCF
+        // words are already fully composed per-word artwork joined by a
+        // literal space, with no cross-word shaping/kerning to preserve.
+        content = _InteractiveAyahText(
+          words: line.words,
+          fontFamily: pageFontFamily,
+          selectedAyahKey: selectedAyahKey,
+          onWordTap: onWordTap,
         );
       case MushafLineType.basmallah:
         // Always surah 1 ayah 1's real words/font, not this page's own
@@ -288,5 +315,56 @@ class _MushafLineView extends StatelessWidget {
         child: fitted,
       ),
     );
+  }
+}
+
+/// One ayah line's words, each as its own [TextSpan] so it can carry a tap
+/// target and its own highlight (spec §9). Visually identical to a single
+/// joined [Text] — every span shares the exact same [TextStyle], and QCF
+/// words are already fully composed per-word glyphs, so splitting them
+/// doesn't change spacing/shaping, only adds per-word hit targets.
+class _InteractiveAyahText extends StatelessWidget {
+  final List<Word> words;
+  final String? fontFamily;
+  final String? selectedAyahKey;
+  final ValueChanged<Word>? onWordTap;
+
+  const _InteractiveAyahText({
+    required this.words,
+    required this.fontFamily,
+    required this.selectedAyahKey,
+    required this.onWordTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final baseStyle = TextStyle(
+      fontFamily: fontFamily,
+      fontSize: 28,
+      height: 1.0,
+      color: mushafInkColor,
+    );
+
+    final spans = <InlineSpan>[];
+    for (var i = 0; i < words.length; i++) {
+      final word = words[i];
+      final isSelected = word.ayahKey == selectedAyahKey;
+      spans.add(
+        TextSpan(
+          text: word.text,
+          style: isSelected
+              ? baseStyle.copyWith(backgroundColor: mushafAyahHighlightColor)
+              : baseStyle,
+          recognizer: onWordTap == null
+              ? null
+              : (TapGestureRecognizer()..onTap = () => onWordTap!(word)),
+        ),
+      );
+      if (i != words.length - 1) {
+        spans.add(TextSpan(text: ' ', style: baseStyle));
+      }
+    }
+
+    return Text.rich(TextSpan(children: spans), maxLines: 1, softWrap: false);
   }
 }

@@ -16,4 +16,9 @@ abstract class QuranRepository {
   Future<List<Word>> getWords(String ayahKey);
 
   Future<List<Word>> getWordsForPage(int pageNumber);
+
+  /// Total number of Mushaf pages in the installed layout (spec §21: the
+  /// real reader must know this to page/lazy-load across the whole Mushaf
+  /// without assuming a hardcoded page count).
+  Future<int> getPageCount();
 }

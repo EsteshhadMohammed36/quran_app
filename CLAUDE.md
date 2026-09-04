@@ -70,6 +70,55 @@ QUL/SQLite rows directly. State management: Provider (spec §17.1).
   - [x] QUL resource download instructions — user downloaded 4 resources for the `madinah-v2-qpc-v2-hafs` group into `raw_resources/` (git-ignored): Mushaf layout (`qpc-v2-15-lines.db.zip`), Quran script (`qpc-v2.db.zip`), font (`QPC V2 Font.ttf.bz2`, actually a zip of 604 page fonts), surah names (`quran-metadata-surah-name.json.zip` — added mid-Prompt-6 once `surahs.name_arabic` turned out to have no source among the first 3; user chose the QUL fallback over quran-assets/metadata). Schemas verified by hand against spec §6/§8. Checksums + full metadata in `tool/resource_manifest_seed.dart`.
   - [x] Ingestion pipeline (§23/§23.1/§24) — `tool/ingest_quran_data.dart`: reads the 4 raw_resources files via the `sqlite3` CLI + `package:archive`, transforms to canonical schema, runs all §24 integrity checks, writes a fresh pre-populated `assets/database/quran.db` (114 surahs, 6236 ayahs, 83668 words, 9046 mushaf_lines, 4 resource_manifest rows — verified against live counts). `lib/core/database/app_database.dart` now copies this bundled asset to the documents dir on first run instead of on-device ingestion (user's explicit choice over in-app ingestion, 2026-08-30). `flutter analyze`/`dart analyze tool/`/`flutter test`: clean. Verified end-to-end on the Pixel 6 API 34 emulator (temporary debug print, reverted) — real device confirmed the asset-copy + query path works.
 - [ ] Phase 2 — Ayah selection, context sheet, tafsir, morphology, audio
+  - [x] Full 604-page reader + ayah selection/hit testing (Prompt 9, spec
+    §9/§17.1/§21) — `MushafReaderScreen` (new, now `main.dart`'s home,
+    superseding `MushafPrototypeScreen`) swipes across every page the
+    installed layout has (`QuranRepository.getPageCount()`, not a
+    hardcoded 604), lazily loading pages through the new
+    `QuranReaderProvider` (spec §17.1) rather than the prototype's
+    preload-everything-up-front approach: a small `Map` cache keyed by
+    page number, evicted down to `currentPage ± 2` on every page-settle
+    (rule #6/spec §21 — never all 604 pages in memory at once), with the
+    two immediate neighbors prefetched so swiping stays instant. Tapping
+    any word in `MushafPageView`/`_MushafLineView` resolves
+    `Word.ayahKey` (`surah:ayah`, new getter) and highlights every word
+    sharing that key across the whole rendered page — verified this
+    correctly spans a Mushaf-line boundary (page 2, Al-Baqarah ayah 2
+    wraps line 2→3; tapping either part highlighted both, ayah 1 on the
+    same line stayed unhighlighted), i.e. spec §26's "Boundary ayah" case
+    passes. Implemented as per-word `TextSpan`s with a
+    `TapGestureRecognizer` each (same `TextStyle` as the old single-Text
+    version, so glyph spacing/shaping is pixel-identical — verified, not
+    assumed) rather than manual hit-testing, since manual hit-testing
+    would've needed a page-level tap-outside-clears handler competing
+    with per-word recognizers in the same gesture arena, a known Flutter
+    footgun (nested tap detectors can double-fire); scoped "tap outside
+    dismisses" out of this prompt instead, since spec §9.1 ties it to the
+    context sheet's own UX rules, not built yet. `surah_name`/basmallah
+    lines stay non-interactive (basmallah reuses Al-Fatiha 1:1's words
+    for display only — selecting it while reading an unrelated surah's
+    page would be semantically wrong per rule #3).
+  - Bundled all 604 QPC V2 page fonts (previously only the 4 prototype
+    pages' fonts were bundled, rule #5's gate — now satisfied). Extracted
+    via new `tool/extract_qpc_v2_fonts.dart` from the already-manifested
+    `raw_resources/QPC V2 Font.ttf.bz2` (`resource_id: qul-font-qpc-v2`,
+    already covered the full 604-file resource — no new manifest entry
+    needed, rule #4): reads each font's real family name from its own
+    'name' table (spec §7 — confirmed, not assumed, all 604 follow
+    `QCF2{page:03d}`), writes `assets/fonts/qpc_v2/p{1..604}.ttf`, and
+    regenerates both `qpc_v2_font_families.g.dart` (the page→family map)
+    and pubspec.yaml's `fonts:` section (604 entries) directly — hand-
+    editing that many entries wasn't practical. User explicitly signed
+    off on the size/repo-growth tradeoff first (2026-09-05): ~198MB
+    uncompressed across 604 font files, comparable to other full-Mushaf
+    apps. Visually verified on the Pixel 6 API 34 emulator: page 1
+    (unchanged, word-splitting into spans didn't alter rendering), page 2
+    (Al-Baqarah — never part of the original 4-page prototype set, so
+    this is the first real proof all 604 fonts extract/load correctly,
+    not just 4), tap-to-select/highlight-whole-ayah, switching selection
+    between ayahs, and forward page navigation (RTL swipe: drag left-to-
+    right advances page 1→2, matching real Mushaf page-turning).
+    `flutter analyze`/`flutter test`: clean.
 - [ ] Phase 3 — Bookmarks/notes/last-read, performance, validation suite
 
 ## Version control

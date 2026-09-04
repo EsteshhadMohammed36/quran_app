@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'features/quran_reader/presentation/mushaf_prototype_screen.dart';
+import 'features/quran_reader/presentation/mushaf_reader_screen.dart';
 import 'shared/theme/mushaf_theme.dart';
 
 void main() {
@@ -19,10 +19,10 @@ class MyApp extends StatelessWidget {
       // not the default Material 3 seeded scheme, which tinted the page
       // lavender and didn't match a real printed Mushaf.
       theme: buildMushafTheme(),
-      // Spec §25: home is the Mushaf renderer prototype until it's
-      // validated on all 4 required pages. Nothing else is built on top of
-      // the renderer before that (CLAUDE.md rule #5).
-      home: const MushafPrototypeScreen(),
+      // Spec §25's 4-page prototype is validated (CLAUDE.md "Current
+      // phase"); the real reader (Prompt 9: full 604-page navigation +
+      // ayah selection, spec §9/§21) is now the app's home.
+      home: const MushafReaderScreen(),
     );
   }
 }
