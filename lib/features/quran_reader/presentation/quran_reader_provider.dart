@@ -131,6 +131,19 @@ class QuranReaderProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Updates the selected ayah directly by key, keeping the sheet open and
+  /// the active study tab unchanged — used by [TafsirScreen]'s Previous/
+  /// Next ayah navigation (spec §11.1) so returning to the Mushaf ("Return
+  /// to Mushaf") still shows whichever ayah was last viewed in Tafsir as
+  /// selected (spec §11: "Tafsir reader ... without losing ayah identity").
+  /// Unlike [selectWord], this never touches [isAyahSheetOpen] — Tafsir
+  /// navigation shouldn't itself pop the sheet open if it was closed.
+  void selectAyahKey(String ayahKey) {
+    if (_selectedAyahKey == ayahKey) return;
+    _selectedAyahKey = ayahKey;
+    notifyListeners();
+  }
+
   /// spec §9.1 "Outside tap": dismiss the selection and close the sheet.
   void clearSelection() {
     if (_selectedAyahKey == null && !_isAyahSheetOpen) return;

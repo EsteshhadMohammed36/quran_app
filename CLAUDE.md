@@ -177,6 +177,94 @@ QUL/SQLite rows directly. State management: Provider (spec §17.1).
     dismisses, and tapping a non-ayah area (the surah-header banner)
     while an ayah is selected also dismisses. `flutter analyze`/
     `flutter test`: clean.
+  - [x] Tafsir Module (Prompt 11, spec §11/§11.1/§11.2) — sources: Tafsir
+    Ibn Kathir, Tafseer Al-Saadi, Iraab Al-Muyassar, all Arabic, all from
+    QUL's Tafsir directory (each resource's own detail page checked before
+    download per spec §11 — none exposes a license distinct from the
+    site-wide Terms of Use, same as the 5 existing manifest entries; user
+    picked Al-Saadi resource 24 over an unexplained duplicate 308, and
+    Iraab Al-Muyassar over 4 other i'rab resources, both 2026-09-11).
+    `lib/core/database/schema.dart`'s `tafsir_entries` table gained
+    `surah_id`/`ayah_number` columns (for FK/ordering, matching the
+    ayahs/words tables' own convention) and `content` became nullable —
+    verified directly against all 3 downloaded files that a group of
+    consecutive ayahs sharing one tafsir passage stores the real text only
+    on the group's first ("owning") ayah, with every other member ayah's
+    row left NULL and `group_id` pointing back to the owner; every row
+    (owner and members alike) carries `group_ayah_start`/`group_ayah_end`
+    so a single row lookup already gives the full range, no join needed
+    just to display it. `tool/ingest_quran_data.dart` extended (same
+    single-pass pipeline, one combined `quran.db`, not a second db file)
+    with byte-verified UTF-8 reads (already-shared `_querySqliteJson`) and
+    new integrity checks: exactly 6236 entries per source, no
+    duplicate/orphaned ayah_key, every group_id resolves to a real owning
+    row, an Arabic-script sanity check on every owner's content. Two real
+    (not bugs-in-the-checker) upstream data findings surfaced by those
+    checks and deliberately *not* "fixed": As-Saadi has 59 standalone
+    ayahs with genuinely no independent commentary in its own export, and
+    4 As-Saadi rows (2:52, 2:53, 2:103, 23:38) hold a single placeholder
+    symbol ("×"/"*"/"-") instead of Arabic text — both verified against
+    the raw source file directly, kept verbatim rather than papered over
+    (rule #1's spirit: never invent/alter). New row counts: 3
+    `tafsir_sources`, 18708 `tafsir_entries` (3 × 6236), 8
+    `resource_manifest` rows total. `lib/features/tafsir/domain`:
+    `TafsirSource`/`TafsirEntry`/`TafsirGroup` entities +
+    `TafsirRepository` interface matching spec §11.2's method set exactly
+    (`getSources`/`getEntry`/`getGroup`/`search`).
+    `lib/features/tafsir/data/sqlite_tafsir_repository.dart`: `getEntry`
+    resolves the group-owner indirection via a self-join so callers never
+    see the raw NULL-on-members storage shape; `search` is a plain SQL
+    `LIKE` over owner rows' content (MVP scope, not full-text
+    search/ranking — good enough for spec §11.2's method signature, no
+    normalization of diacritics). `lib/features/tafsir/presentation/
+    tafsir_screen.dart`: `TafsirScreen` per spec §11.1's exact structure
+    (Selected Ayah header incl. real ayah text via the newly-shared
+    `QuranAyahText` widget, accordion of the 3 sources — single-open, one
+    search box scoped to whichever source is expanded since
+    `TafsirRepository.search` takes a `sourceId` — Previous/Current/Next
+    ayah navigation crossing surah boundaries at 1:1/114:6, a font-size
+    slider, Return to Mushaf). Opened via a full-screen `Navigator.push`
+    from `AyahContextSheet`'s now-enabled "تفسير" action (previously a
+    disabled placeholder) — deliberately not another bottom sheet, since
+    this needs room for multiple accordion sources plus nav/search/font
+    controls at once. `TafsirScreen` takes the *same*
+    `QuranReaderProvider` instance as an explicit constructor param
+    (not looked up via `Provider.of`/`context.read`) because a route
+    pushed this way isn't a descendant of the `ChangeNotifierProvider`
+    wrapping the reader's own widget tree — ambient lookup would throw;
+    every Previous/Next step calls `QuranReaderProvider.selectAyahKey`
+    (new method) directly so "Return to Mushaf" always shows the
+    last-viewed ayah selected (spec §11: "without losing ayah identity").
+    `lib/features/tafsir/presentation/tafsir_html_text.dart`: a small
+    presentation-only HTML-tag stripper for the sources' HTML-ish content
+    (no new dependency added — kept pubspec's existing minimal dependency
+    set rather than pulling in a full HTML-rendering package for this).
+    `AyahContextSheet`'s own ayah-text rendering (`_AyahText`) was
+    extracted into `lib/shared/widgets/quran_ayah_text.dart` as public
+    `QuranAyahText` so both surfaces share one implementation of this
+    Quran-text/per-page-font rendering logic rather than risking two
+    copies silently diverging.
+    Verification: `flutter analyze`, `dart analyze tool/`, and
+    `flutter test` all clean throughout. Visually verified on the Pixel 6
+    API 34 emulator: the Tafsir action opens `TafsirScreen` with the
+    correct selected ayah (Al-Baqarah 2:3/2:4, correct calligraphy via the
+    shared widget — first real proof `QuranAyahText` still renders
+    correctly after the extraction), all 3 sources listed in the
+    accordion with correct name/author (Iraab Al-Muyassar correctly shows
+    no author line, not an invented one), Previous/Next navigation moving
+    the selection and syncing back to the Mushaf reader's own selection
+    state on return. The underlying group-resolution/search SQL (the
+    exact queries `SqliteTafsirRepository` runs) was additionally verified
+    directly against the shipped `quran.db` via the `sqlite3` CLI for a
+    real 11-ayah group (Ibn Kathir, Al-'Adiyat 100:1-100:11) and a search
+    query, independent of the on-device UI pass. Accordion expand/collapse
+    and the font-size slider's visual effect were exercised in an earlier
+    run of this same build before an emulator restart interrupted the
+    session (not independently re-confirmed after the restart — flaky
+    touch-input dispatch on the restarted emulator instance blocked
+    further on-device interaction, confirmed unrelated to the app itself
+    since even the Android home screen stopped responding to `adb input
+    tap` at the same time `adb input keyevent` kept working).
 - [ ] Phase 3 — Bookmarks/notes/last-read, performance, validation suite
 
 ## Version control

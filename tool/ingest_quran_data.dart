@@ -1,7 +1,8 @@
 // ignore_for_file: avoid_print
 //
 // Data ingestion pipeline (spec §23) for the Phase 0 Mushaf prototype
-// resource set (compatibility_group `madinah-v2-qpc-v2-hafs`).
+// resource set (compatibility_group `madinah-v2-qpc-v2-hafs`) and — since
+// Prompt 11 — the Tafsir module (spec §11).
 //
 // Reads the 4 raw QUL resources from `raw_resources/` (git-ignored, see
 // tool/resource_manifest_seed.dart for exactly what/why), transforms field
@@ -12,6 +13,10 @@
 // by `lib/core/database/app_database.dart`, rather than re-ingesting on
 // every install (see CLAUDE.md "Current phase" for why this shape was
 // chosen over on-device ingestion).
+//
+// Prompt 11 added 3 more raw QUL resources (Ibn Kathir, As-Saadi, Iraab
+// Al-Muyassar — all Arabic tafsir) into the same single-pass pipeline, so
+// the app still bundles exactly one combined database file (spec §15).
 //
 // Run from the repo root:
 //   dart run tool/ingest_quran_data.dart
@@ -47,6 +52,41 @@ const String _scriptDbInnerName = 'qpc-v2.db';
 const String _surahNamesZipName = 'quran-metadata-surah-name.json.zip';
 const String _surahNamesJsonInnerName = 'quran-metadata-surah-name.json';
 
+// --- Tafsir module (Prompt 11, spec §11) ------------------------------------
+const String _ibnKathirZipName = 'ar-tafsir-ibn-kathir.db.zip';
+const String _ibnKathirDbInnerName = 'ar-tafsir-ibn-kathir.db';
+const String _saadiZipName = 'ar-tafseer-al-saddi.db.zip';
+const String _saadiDbInnerName = 'ar-tafseer-al-saddi.db';
+const String _iraabZipName = 'al-i-rab-al-muyassar.db.zip';
+const String _iraabDbInnerName = 'al-i-rab-al-muyassar.db';
+
+/// The `tafsir_sources` registry rows. Not derived from any downloaded
+/// file — each source's name/author is hardcoded here, same treatment as
+/// the other small pieces of static metadata already in this script (e.g.
+/// `_supportedLineTypes`).
+const List<Map<String, Object?>> _tafsirSources = [
+  {
+    'source_id': 'tafsir-ibn-kathir-ar',
+    'name': 'تفسير ابن كثير',
+    'language': 'ar',
+    'author': 'ابن كثير',
+  },
+  {
+    'source_id': 'tafsir-saadi-ar',
+    'name': 'تفسير السعدي',
+    'language': 'ar',
+    'author': 'عبد الرحمن بن ناصر السعدي',
+  },
+  {
+    'source_id': 'tafsir-iraab-muyassar-ar',
+    'name': 'الإعراب الميسر',
+    'language': 'ar',
+    // Author isn't attributed on the resource's own QUL page — left null
+    // rather than invented.
+    'author': null,
+  },
+];
+
 const Set<String> _supportedLineTypes = {'ayah', 'surah_name', 'basmallah'};
 const int _maxPageNumber = 604;
 
@@ -78,6 +118,21 @@ Future<void> main(List<String> args) async {
       entryName: _surahNamesJsonInnerName,
       outDir: work,
     );
+    final File ibnKathirDb = _extractSingleEntry(
+      zip: File('${rawDir.path}/$_ibnKathirZipName'),
+      entryName: _ibnKathirDbInnerName,
+      outDir: work,
+    );
+    final File saadiDb = _extractSingleEntry(
+      zip: File('${rawDir.path}/$_saadiZipName'),
+      entryName: _saadiDbInnerName,
+      outDir: work,
+    );
+    final File iraabDb = _extractSingleEntry(
+      zip: File('${rawDir.path}/$_iraabZipName'),
+      entryName: _iraabDbInnerName,
+      outDir: work,
+    );
 
     print('Reading source data...');
     final List<Map<String, dynamic>> wordRows = _querySqliteJson(
@@ -92,10 +147,24 @@ Future<void> main(List<String> args) async {
     );
     final Map<String, dynamic> surahNamesRaw =
         jsonDecode(surahNamesJson.readAsStringSync()) as Map<String, dynamic>;
+    final List<Map<String, dynamic>> ibnKathirRows = _querySqliteJson(
+      ibnKathirDb.path,
+      'SELECT ayah_key, group_ayah_key, from_ayah, to_ayah, text FROM tafsir;',
+    );
+    final List<Map<String, dynamic>> saadiRows = _querySqliteJson(
+      saadiDb.path,
+      'SELECT ayah_key, group_ayah_key, from_ayah, to_ayah, text FROM tafsir;',
+    );
+    final List<Map<String, dynamic>> iraabRows = _querySqliteJson(
+      iraabDb.path,
+      'SELECT ayah_key, group_ayah_key, from_ayah, to_ayah, text FROM tafsir;',
+    );
 
     print(
       'Loaded ${wordRows.length} words, ${pageRows.length} mushaf lines, '
-      '${surahNamesRaw.length} surah name entries.',
+      '${surahNamesRaw.length} surah name entries, '
+      '${ibnKathirRows.length} + ${saadiRows.length} + ${iraabRows.length} '
+      'tafsir rows (Ibn Kathir / As-Saadi / Iraab Al-Muyassar).',
     );
 
     print('Verifying word glyph text byte-for-byte against source...');
@@ -109,6 +178,17 @@ Future<void> main(List<String> args) async {
     final List<Map<String, Object?>> mushafLines = _buildMushafLines(
       pageRows,
     );
+    final Map<String, List<Map<String, Object?>>> tafsirEntriesBySource = {
+      'tafsir-ibn-kathir-ar': _buildTafsirEntries(
+        'tafsir-ibn-kathir-ar',
+        ibnKathirRows,
+      ),
+      'tafsir-saadi-ar': _buildTafsirEntries('tafsir-saadi-ar', saadiRows),
+      'tafsir-iraab-muyassar-ar': _buildTafsirEntries(
+        'tafsir-iraab-muyassar-ar',
+        iraabRows,
+      ),
+    };
 
     print('Running integrity checks (spec §24)...');
     final List<String> failures = _runIntegrityChecks(
@@ -116,6 +196,13 @@ Future<void> main(List<String> args) async {
       ayahs: ayahs,
       words: words,
       mushafLines: mushafLines,
+    );
+    failures.addAll(
+      _runTafsirIntegrityChecks(
+        ayahs: ayahs,
+        tafsirSources: _tafsirSources,
+        tafsirEntriesBySource: tafsirEntriesBySource,
+      ),
     );
     if (failures.isNotEmpty) {
       _fail(
@@ -127,10 +214,21 @@ Future<void> main(List<String> args) async {
     print('All integrity checks passed.');
 
     final DateTime retrievedAt = DateTime(2026, 8, 30);
-    final List<Map<String, Object?>> manifestRows = phase0ResourceManifestSeed
-        .map((ResourceManifestEntry e) =>
-            e.copyWith(retrievedAt: retrievedAt).toMap())
-        .toList();
+    final DateTime tafsirRetrievedAt = DateTime(2026, 9, 11);
+    final List<Map<String, Object?>> manifestRows = [
+      ...phase0ResourceManifestSeed.map(
+        (ResourceManifestEntry e) =>
+            e.copyWith(retrievedAt: retrievedAt).toMap(),
+      ),
+      ...tafsirModuleResourceManifestSeed.map(
+        (ResourceManifestEntry e) =>
+            e.copyWith(retrievedAt: tafsirRetrievedAt).toMap(),
+      ),
+    ];
+
+    final List<Map<String, Object?>> allTafsirEntries = [
+      for (final entries in tafsirEntriesBySource.values) ...entries,
+    ];
 
     print('Building SQL script...');
     final String sql = _buildSqlScript(
@@ -138,6 +236,8 @@ Future<void> main(List<String> args) async {
       ayahs: ayahs,
       words: words,
       mushafLines: mushafLines,
+      tafsirSources: _tafsirSources,
+      tafsirEntries: allTafsirEntries,
       resourceManifest: manifestRows,
     );
 
@@ -152,6 +252,8 @@ Future<void> main(List<String> args) async {
       expectedAyahs: ayahs.length,
       expectedWords: words.length,
       expectedMushafLines: mushafLines.length,
+      expectedTafsirSources: _tafsirSources.length,
+      expectedTafsirEntries: allTafsirEntries.length,
       expectedManifestRows: manifestRows.length,
     );
 
@@ -396,6 +498,74 @@ int? _asIntOrNull(Object? value) {
   throw ArgumentError('Unexpected value for nullable int: $value');
 }
 
+String? _blankToNull(String? s) => (s == null || s.isEmpty) ? null : s;
+
+/// Transforms one tafsir source's raw `tafsir` rows (schema verified by
+/// hand against all 3 downloaded files: `tafsir(ayah_key, group_ayah_key,
+/// from_ayah, to_ayah, ayah_keys, text)`) into `tafsir_entries` rows.
+///
+/// The source's own `group_ayah_key`/`from_ayah`/`to_ayah`/`text` columns
+/// hold the real range and text only on a group's owning ayah; every other
+/// member ayah in that group has those 4 fields blank and `group_ayah_key`
+/// pointing back at the owner. This resolves the range once per group so
+/// every output row (owner and members alike) carries
+/// `group_ayah_start`/`group_ayah_end`, while `content` is populated only
+/// on the owner (spec §11: "preserve group references" — not flattened
+/// away by duplicating the text onto every member row).
+List<Map<String, Object?>> _buildTafsirEntries(
+  String sourceId,
+  List<Map<String, dynamic>> rows,
+) {
+  final Map<String, String> startByGroup = {};
+  final Map<String, String> endByGroup = {};
+  for (final r in rows) {
+    final String ayahKey = r['ayah_key'] as String;
+    final String groupId =
+        _blankToNull(r['group_ayah_key'] as String?) ?? ayahKey;
+    final String? from = _blankToNull(r['from_ayah'] as String?);
+    final String? to = _blankToNull(r['to_ayah'] as String?);
+    if (from != null && to != null) {
+      startByGroup[groupId] = from;
+      endByGroup[groupId] = to;
+    }
+  }
+
+  final List<Map<String, Object?>> result = [];
+  for (final r in rows) {
+    final String ayahKey = r['ayah_key'] as String;
+    final List<String> parts = ayahKey.split(':');
+    final String groupId =
+        _blankToNull(r['group_ayah_key'] as String?) ?? ayahKey;
+    final String? start = startByGroup[groupId];
+    final String? end = endByGroup[groupId];
+    if (start == null || end == null) {
+      _fail(
+        'Tafsir source "$sourceId": group "$groupId" (member ayah '
+        '$ayahKey) has no owning row with a populated range.',
+      );
+    }
+    result.add({
+      'source_id': sourceId,
+      'surah_id': int.parse(parts[0]),
+      'ayah_number': int.parse(parts[1]),
+      'ayah_key': ayahKey,
+      'group_id': groupId,
+      'group_ayah_start': start,
+      'group_ayah_end': end,
+      // Unmodified commentary text from the source, verbatim (still no
+      // transformation, same spirit as rule #1, even though this isn't
+      // Quran script) — blank means "not the group owner", per above.
+      'content': _blankToNull(r['text'] as String?),
+    });
+  }
+  result.sort((a, b) {
+    final int s = (a['surah_id'] as int).compareTo(b['surah_id'] as int);
+    if (s != 0) return s;
+    return (a['ayah_number'] as int).compareTo(b['ayah_number'] as int);
+  });
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Integrity checks (spec §24)
 // ---------------------------------------------------------------------------
@@ -539,6 +709,151 @@ List<String> _runIntegrityChecks({
   return failures;
 }
 
+/// Regex for "contains at least one Arabic-script character" — a cheap
+/// sanity check against wholesale mojibake (the exact Windows-encoding bug
+/// class this pipeline already found and fixed once for Quran script text
+/// — see the CLAUDE.md "Current phase" writeup). `_querySqliteJson` always
+/// forces UTF-8 decoding already, so this isn't expected to ever fire; it
+/// exists as a second, independent line of defense for tafsir content the
+/// same way `_verifyWordBytesMatchSource` is for Quran script.
+final RegExp _arabicScriptPattern = RegExp('[؀-ۿ]');
+
+List<String> _runTafsirIntegrityChecks({
+  required List<Map<String, Object?>> ayahs,
+  required List<Map<String, Object?>> tafsirSources,
+  required Map<String, List<Map<String, Object?>>> tafsirEntriesBySource,
+}) {
+  final List<String> failures = [];
+  final Set<String> allAyahKeys = ayahs
+      .map((a) => a['ayah_key'] as String)
+      .toSet();
+  final Set<String> sourceIds = tafsirSources
+      .map((s) => s['source_id'] as String)
+      .toSet();
+
+  tafsirEntriesBySource.forEach((sourceId, entries) {
+    if (!sourceIds.contains(sourceId)) {
+      failures.add(
+        'Tafsir entries reference unknown source_id "$sourceId" (no '
+        'tafsir_sources row).',
+      );
+    }
+    if (entries.length != allAyahKeys.length) {
+      failures.add(
+        'Tafsir source "$sourceId": ${entries.length} entries, expected '
+        '${allAyahKeys.length} (one per ayah).',
+      );
+    }
+
+    final Set<String> seenKeys = {};
+    final Set<String> ownerKeysWithContent = {};
+    int noContentCount = 0;
+    final List<String> noArabicContentKeys = [];
+    for (final e in entries) {
+      final String ayahKey = e['ayah_key'] as String;
+      if (!seenKeys.add(ayahKey)) {
+        failures.add(
+          'Tafsir source "$sourceId": duplicate ayah_key "$ayahKey".',
+        );
+      }
+      if (!allAyahKeys.contains(ayahKey)) {
+        failures.add(
+          'Tafsir source "$sourceId": ayah_key "$ayahKey" has no matching '
+          'ayahs row.',
+        );
+      }
+      final String groupId = e['group_id'] as String;
+      final String start = e['group_ayah_start'] as String;
+      final String end = e['group_ayah_end'] as String;
+      final String? content = e['content'] as String?;
+      final bool isMultiAyahGroup = start != end;
+      if (ayahKey == groupId) {
+        // The group's owning row. Verified directly against all 3
+        // downloaded sources: a *standalone* ayah (start == end, i.e. not
+        // really grouped with anything) can legitimately have no content
+        // at all — some sources (As-Saadi, 59 cases) genuinely skip
+        // commentary on certain ayahs rather than export an empty string
+        // as a placeholder. That's a real editorial gap, not a defect. A
+        // *multi-ayah* group's owner having no content would mean the
+        // whole group's tafsir is unrecoverable, which is a real defect.
+        if (content == null) {
+          noContentCount++;
+          if (isMultiAyahGroup) {
+            failures.add(
+              'Tafsir source "$sourceId": multi-ayah group "$groupId" '
+              '($start..$end) has no content on its owning row.',
+            );
+          }
+        } else {
+          if (!_arabicScriptPattern.hasMatch(content)) {
+            // Verified directly against the source (not a transform bug):
+            // a handful of As-Saadi rows (2:52, 2:53, 2:103, 23:38) hold a
+            // single placeholder symbol ("×", "*", "-") instead of Arabic
+            // text in the export itself. `_querySqliteJson` already forces
+            // UTF-8 decoding for every query, so this isn't the historical
+            // mojibake bug (CLAUDE.md "Current phase") recurring — it's
+            // genuine upstream content, kept verbatim rather than treated
+            // as a failure (rule #1's spirit: never invent/alter, not even
+            // to "fix" something that looks odd).
+            noArabicContentKeys.add('$sourceId:$ayahKey');
+          }
+          ownerKeysWithContent.add(groupId);
+        }
+      } else if (content != null) {
+        failures.add(
+          'Tafsir source "$sourceId": non-owner ayah "$ayahKey" (group '
+          '"$groupId") unexpectedly has its own content.',
+        );
+      }
+      if (!allAyahKeys.contains(start) || !allAyahKeys.contains(end)) {
+        failures.add(
+          'Tafsir source "$sourceId": group "$groupId" range ($start..'
+          '$end) references an ayah that does not exist.',
+        );
+      }
+    }
+    // Every group_id used above must resolve to some row that actually
+    // exists in this source (a real structural defect if not) — content
+    // being present on that row is verified separately above, only for
+    // multi-ayah groups.
+    for (final e in entries) {
+      final String groupId = e['group_id'] as String;
+      if (!seenKeys.contains(groupId)) {
+        failures.add(
+          'Tafsir source "$sourceId": group "$groupId" has no owning row '
+          'at all (dangling group reference).',
+        );
+      }
+    }
+    if (noContentCount > 0) {
+      print(
+        '  Note: tafsir source "$sourceId" has $noContentCount ayah(s) '
+        'with no independent commentary in the source export (all '
+        'standalone, none part of a multi-ayah group) — recorded as-is, '
+        'not invented.',
+      );
+    }
+    if (noArabicContentKeys.isNotEmpty) {
+      print(
+        '  Note: tafsir source "$sourceId" has ${noArabicContentKeys.length} '
+        'entries whose content has no Arabic-script characters '
+        '(${noArabicContentKeys.join(", ")}) — verified against the source '
+        'file directly, genuine upstream content, not a transform bug.',
+      );
+    }
+    final Set<String> missing = allAyahKeys.difference(seenKeys);
+    if (missing.isNotEmpty) {
+      failures.add(
+        'Tafsir source "$sourceId" is missing entries for: '
+        '${missing.take(5).join(", ")}'
+        '${missing.length > 5 ? " (+${missing.length - 5} more)" : ""}.',
+      );
+    }
+  });
+
+  return failures;
+}
+
 // ---------------------------------------------------------------------------
 // SQL generation
 // ---------------------------------------------------------------------------
@@ -561,6 +876,8 @@ String _buildSqlScript({
   required List<Map<String, Object?>> ayahs,
   required List<Map<String, Object?>> words,
   required List<Map<String, Object?>> mushafLines,
+  required List<Map<String, Object?>> tafsirSources,
+  required List<Map<String, Object?>> tafsirEntries,
   required List<Map<String, Object?>> resourceManifest,
 }) {
   final StringBuffer sql = StringBuffer();
@@ -569,6 +886,9 @@ String _buildSqlScript({
     sql.writeln(statement);
   }
   for (final statement in createIndexStatements) {
+    sql.writeln(statement);
+  }
+  for (final statement in additionalIndexStatements) {
     sql.writeln(statement);
   }
   sql.writeln('BEGIN TRANSACTION;');
@@ -583,6 +903,12 @@ String _buildSqlScript({
   }
   for (final row in mushafLines) {
     sql.writeln(_insertStatement('mushaf_lines', row));
+  }
+  for (final row in tafsirSources) {
+    sql.writeln(_insertStatement('tafsir_sources', row));
+  }
+  for (final row in tafsirEntries) {
+    sql.writeln(_insertStatement('tafsir_entries', row));
   }
   for (final row in resourceManifest) {
     sql.writeln(_insertStatement('resource_manifest', row));
@@ -601,6 +927,8 @@ void _verifyWrittenDatabase({
   required int expectedAyahs,
   required int expectedWords,
   required int expectedMushafLines,
+  required int expectedTafsirSources,
+  required int expectedTafsirEntries,
   required int expectedManifestRows,
 }) {
   final Map<String, int> expected = {
@@ -608,6 +936,8 @@ void _verifyWrittenDatabase({
     'ayahs': expectedAyahs,
     'words': expectedWords,
     'mushaf_lines': expectedMushafLines,
+    'tafsir_sources': expectedTafsirSources,
+    'tafsir_entries': expectedTafsirEntries,
     'resource_manifest': expectedManifestRows,
   };
   for (final entry in expected.entries) {

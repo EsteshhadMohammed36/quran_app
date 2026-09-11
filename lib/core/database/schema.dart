@@ -94,19 +94,35 @@ CREATE TABLE tafsir_sources (
 ''';
 
 /// `tafsir_entries` — Tafsir content/groups. Key: `(source_id, ayah_key)`.
-/// Grouped/continued tafsir entries share a `group_id` (§11: "Do not assume
-/// every surah:ayah has an independent text blob. Preserve group references
-/// where present.").
+///
+/// Verified directly against the 3 downloaded QUL tafsir resources (Ibn
+/// Kathir, As-Saadi, Iraab Al-Muyassar — Arabic, Prompt 11, spec §11):
+/// every source gives exactly one row per ayah, but a *group* of
+/// consecutive ayahs sharing one tafsir passage stores the real text only
+/// on the group's first ("owning") ayah — every other ayah in that group
+/// has its own row with `content` left NULL and `group_id` pointing back
+/// to the owner's `ayah_key` (§11: "Do not assume every surah:ayah has an
+/// independent text blob. Preserve group references where present.").
+/// `group_id` equals `ayah_key` itself for a standalone (non-grouped)
+/// entry — every row belongs to "a group", just one of size 1 in that
+/// case, so callers never need to special-case "no group".
+/// `group_ayah_start`/`group_ayah_end` are copied onto *every* row in a
+/// group (owner and members alike) so a single row lookup already tells
+/// you the full ayah range, with no second query needed just to display
+/// e.g. "tafsir for ayahs 2:8-2:9".
 const String createTafsirEntriesTable = '''
 CREATE TABLE tafsir_entries (
   source_id TEXT NOT NULL,
+  surah_id INTEGER NOT NULL,
+  ayah_number INTEGER NOT NULL,
   ayah_key TEXT NOT NULL,
-  group_id TEXT,
-  group_ayah_start TEXT,
-  group_ayah_end TEXT,
-  content TEXT NOT NULL,
+  group_id TEXT NOT NULL,
+  group_ayah_start TEXT NOT NULL,
+  group_ayah_end TEXT NOT NULL,
+  content TEXT,
   PRIMARY KEY (source_id, ayah_key),
-  FOREIGN KEY (source_id) REFERENCES tafsir_sources (source_id)
+  FOREIGN KEY (source_id) REFERENCES tafsir_sources (source_id),
+  FOREIGN KEY (surah_id, ayah_number) REFERENCES ayahs (surah_id, ayah_number)
 );
 ''';
 
@@ -253,4 +269,14 @@ const List<String> createIndexStatements = [
   'CREATE INDEX idx_mushaf_lines ON mushaf_lines(page_number, line_number);',
   'CREATE INDEX idx_tafsir ON tafsir_entries(source_id, ayah_key);',
   'CREATE INDEX idx_morphology ON morphology(surah_id, ayah_number, word_position);',
+];
+
+/// Supplementary indexes beyond spec §15.1's literal list — not required
+/// there verbatim, added for query paths that list itself doesn't cover.
+/// `idx_tafsir_group` speeds up [TafsirRepository.getGroup]'s "find every
+/// member ayah of this group" query (`WHERE source_id = ? AND group_id =
+/// ?`), which `idx_tafsir` (keyed on `ayah_key`, not `group_id`) can't
+/// serve.
+const List<String> additionalIndexStatements = [
+  'CREATE INDEX idx_tafsir_group ON tafsir_entries(source_id, group_id);',
 ];
