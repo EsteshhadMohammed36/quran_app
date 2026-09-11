@@ -265,6 +265,38 @@ QUL/SQLite rows directly. State management: Provider (spec §17.1).
     further on-device interaction, confirmed unrelated to the app itself
     since even the Android home screen stopped responding to `adb input
     tap` at the same time `adb input keyevent` kept working).
+  - [ ] Morphology Module (Prompt 12, spec §12/§12.1/§12.2) — **in
+    progress, blocked on data**. Two of the three raw_resources downloads
+    needed for root/lemma/stem ingestion (`word-lemma.db.zip`,
+    `word-stem.db.zip`) fail a zip integrity check (no EOCD record —
+    truncated/corrupted download); `word-root.db.zip` alone is fine
+    (verified: `roots`/`root_words` tables, `word_location` key matches
+    spec §12.1's `surah:ayah:word_position` format exactly). Ingestion
+    pipeline work is on hold until both are re-downloaded from
+    [QUL's morphology resources page](https://qul.tarteel.ai/resources/morphology)
+    (word-by-word variants, not ayah-by-ayah) — confirmed directly against
+    that page there's no separate POS/grammar-tag resource file to pair
+    with them, so `morphology.part_of_speech`/`grammar_tags` will stay
+    NULL for this prompt (matches spec §12.2's "(when available)").
+    In the meantime, fixed a real naming bug this surfaced in the Ayah
+    Context Sheet's study tabs (`ayah_context_sheet.dart`): `StudyTab
+    .morphology`'s tab was labeled "الإعراب" and `StudyTab.grammar`'s was
+    labeled "النحو" — backwards against spec §12 (morphology =
+    root/lemma/stem/POS) vs §13 (grammar = syntactic i'rab analysis).
+    Relabeled to "الصرف" (morphology) / "الإعراب" (grammar), and since
+    "الإعراب" now correctly names spec §13's i'rab module, wired it to
+    real content instead of a placeholder: it reads the already-ingested
+    Iraab Al-Muyassar tafsir source (Prompt 11) directly via
+    `TafsirRepository.getEntry` (new `_GrammarTabContent` widget;
+    `iraabMuyassarSourceId` constant added to `tafsir_source.dart` so the
+    source_id isn't a duplicated magic string) — CLAUDE.md rule #4 (one
+    canonical source per feature), since this is genuinely the same i'rab
+    data spec §13 wants, not a separate dataset. "الصرف" itself stays a
+    placeholder pending the two corrupted downloads. `flutter analyze`/
+    `flutter test`: clean. Verified visually on the Pixel 6 API 34
+    emulator: tab labels correct, "الإعراب" shows real i'rab text for
+    1:4 ("مالك: صفة رابعة لله"), "الصرف" still shows its not-available
+    placeholder.
 - [ ] Phase 3 — Bookmarks/notes/last-read, performance, validation suite
 
 ## Version control
