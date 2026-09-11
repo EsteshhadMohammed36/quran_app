@@ -189,3 +189,92 @@ const List<ResourceManifestEntry> phase0ResourceManifestSeed = [
 const String phase0ResourceManifestNotes = '''
 See doc comments above each entry and on this constant's declaration.
 ''';
+
+/// Resource manifest entries for the Tafsir module (Prompt 11, spec §11).
+///
+/// Sources: Tafsir Ibn Kathir, Tafseer Al-Saadi, and Iraab Al-Muyassar, all
+/// Arabic, all from QUL's Tafsir directory
+/// (https://qul.tarteel.ai/resources/tafsir). Ibn Kathir and As-Saadi match
+/// spec §11's own recommendation by name; Iraab Al-Muyassar was chosen as
+/// the "Arabic grammar/explanation source" over 4 other i'rab resources on
+/// QUL (I'rab Al Quran li Al Darwish, Al Jadwal fi I'rab Al Quran, Tahlil
+/// Kalimat al-Qur'an, Al-Muyassar fi Gharib al-Quran) because it's pitched
+/// at general readers rather than being a heavier academic multi-volume
+/// work — user's explicit choice, 2026-09-11, after being shown all 5
+/// candidates.
+///
+/// Each resource's own detail page was checked before download (spec §11:
+/// "Exact source choice must be confirmed against the resource detail page
+/// and terms before release") — none of the 3 exposes a resource-specific
+/// license distinct from the site-wide Terms of Use, same as every other
+/// QUL resource already in this manifest, so `licenseOrTermsUrl` records
+/// that same shared terms URL for all three, unchanged from the 5 entries
+/// above.
+///
+/// Two Arabic As-Saadi resources exist on QUL (ids 24 and 308) with no
+/// visible distinction between them on either page (no "supersedes"/
+/// "deprecated" note, no differing author blurb). The user chose resource
+/// 24 — the older/lower-numbered id, part of the same early batch as Ibn
+/// Kathir's own id 22 — since there was no textual basis found to prefer
+/// 308 (2026-09-11).
+///
+/// Downloaded manually into raw_resources/ on 2026-09-11 (QUL gates these
+/// downloads behind login, same as the 4 Phase 1 resources above).
+/// Checksums below were computed against the actual downloaded files.
+const List<ResourceManifestEntry> tafsirModuleResourceManifestSeed = [
+  ResourceManifestEntry(
+    resourceId: 'qul-tafsir-ibn-kathir-ar',
+    resourceName: 'Tafsir Ibn Kathir (Arabic)',
+    provider: 'QUL',
+    category: 'tafsir',
+    sourceUrl: 'https://qul.tarteel.ai/resources/tafsir/22',
+    downloadFormat: 'sqlite',
+    versionOrRevision: 'file dated 2025-05-26 (per zip entry timestamp)',
+    licenseOrTermsUrl: 'https://www.tarteel.ai/terms',
+    sha256:
+        'f8d1c43e5252c6b80891dbc9dd2602629af3ff2e9fb1d1ef669a9eafbe680ec7',
+    targetTableOrAssetPath: 'tafsir_entries',
+    compatibilityGroup: 'madinah-v2-qpc-v2-hafs',
+    status: ResourceManifestStatus.pending,
+    attributionText:
+        'Tafsir Ibn Kathir, via Quranic Universal Library (qul.tarteel.ai).',
+  ),
+
+  ResourceManifestEntry(
+    resourceId: 'qul-tafsir-saadi-ar',
+    resourceName: 'Tafseer Al-Saadi (Arabic)',
+    provider: 'QUL',
+    category: 'tafsir',
+    sourceUrl: 'https://qul.tarteel.ai/resources/tafsir/24',
+    downloadFormat: 'sqlite',
+    versionOrRevision: 'file dated 2025-05-26 (per zip entry timestamp)',
+    licenseOrTermsUrl: 'https://www.tarteel.ai/terms',
+    sha256:
+        '9861b3520c9325137fa69dad14fb9c766f217def3e5d4b4ad4c555b8c54daec7',
+    targetTableOrAssetPath: 'tafsir_entries',
+    compatibilityGroup: 'madinah-v2-qpc-v2-hafs',
+    status: ResourceManifestStatus.pending,
+    attributionText:
+        "Tafseer Al-Saadi (Abd al-Rahman ibn Nasir As-Sa'di), via Quranic "
+        'Universal Library (qul.tarteel.ai).',
+  ),
+
+  ResourceManifestEntry(
+    resourceId: 'qul-tafsir-iraab-muyassar-ar',
+    resourceName: 'Iraab Al-Muyassar (Arabic)',
+    provider: 'QUL',
+    category: 'tafsir',
+    sourceUrl: 'https://qul.tarteel.ai/resources/tafsir/504',
+    downloadFormat: 'sqlite',
+    versionOrRevision: 'file dated 2025-07-11 (per zip entry timestamp)',
+    licenseOrTermsUrl: 'https://www.tarteel.ai/terms',
+    sha256:
+        '27db881913d11b4c5e2263d5b7bd69dec8be182cd40eb89445b6dbbb9885e257',
+    targetTableOrAssetPath: 'tafsir_entries',
+    compatibilityGroup: 'madinah-v2-qpc-v2-hafs',
+    status: ResourceManifestStatus.pending,
+    attributionText:
+        "Al-I'rab Al-Muyassar, via Quranic Universal Library "
+        '(qul.tarteel.ai).',
+  ),
+];

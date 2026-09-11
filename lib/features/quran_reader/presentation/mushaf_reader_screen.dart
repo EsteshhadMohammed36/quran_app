@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../ayah_study/presentation/ayah_context_sheet.dart';
+import '../../tafsir/data/sqlite_tafsir_repository.dart';
+import '../../tafsir/domain/tafsir_repository.dart';
 import '../data/sqlite_quran_repository.dart';
 import '../domain/mushaf_page.dart';
 import '../domain/quran_repository.dart';
@@ -34,6 +36,7 @@ class MushafReaderScreen extends StatefulWidget {
 
 class _MushafReaderScreenState extends State<MushafReaderScreen> {
   final QuranRepository _repository = SqliteQuranRepository();
+  final TafsirRepository _tafsirRepository = SqliteTafsirRepository();
   QuranReaderProvider? _provider;
   PageController? _pageController;
   Object? _initError;
@@ -106,7 +109,10 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
           // it (e.g. tapping a different ayah while the sheet is open),
           // which a modal barrier would block.
           bottomSheet: readerProvider.isAyahSheetOpen
-              ? AyahContextSheet(repository: _repository)
+              ? AyahContextSheet(
+                  repository: _repository,
+                  tafsirRepository: _tafsirRepository,
+                )
               : null,
         ),
       ),

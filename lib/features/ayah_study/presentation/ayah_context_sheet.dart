@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../shared/theme/mushaf_theme.dart';
+import '../../../shared/widgets/quran_ayah_text.dart';
 import '../../quran_reader/domain/quran_repository.dart';
 import '../../quran_reader/domain/surah.dart';
 import '../../quran_reader/domain/word.dart';
-import '../../quran_reader/presentation/qpc_v2_fonts.dart';
 import '../../quran_reader/presentation/quran_reader_provider.dart';
+import '../../tafsir/domain/tafsir_repository.dart';
+import '../../tafsir/presentation/tafsir_screen.dart';
 
 /// The Ayah Context Sheet (spec §10): opens under
 /// `QuranReaderProvider.isAyahSheetOpen`, i.e. whenever an ayah is
@@ -23,9 +25,14 @@ import '../../quran_reader/presentation/quran_reader_provider.dart';
 /// state (spec §20) — Tafsir/Morphology/Audio/Bookmarks are later prompts
 /// that will fill these in, not this one.
 class AyahContextSheet extends StatelessWidget {
-  const AyahContextSheet({super.key, required this.repository});
+  const AyahContextSheet({
+    super.key,
+    required this.repository,
+    required this.tafsirRepository,
+  });
 
   final QuranRepository repository;
+  final TafsirRepository tafsirRepository;
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +47,7 @@ class AyahContextSheet extends StatelessWidget {
       key: ValueKey(ayahKey),
       ayahKey: ayahKey,
       repository: repository,
+      tafsirRepository: tafsirRepository,
     );
   }
 }
@@ -63,10 +71,12 @@ class _AyahSheetContent extends StatefulWidget {
     super.key,
     required this.ayahKey,
     required this.repository,
+    required this.tafsirRepository,
   });
 
   final String ayahKey;
   final QuranRepository repository;
+  final TafsirRepository tafsirRepository;
 
   @override
   State<_AyahSheetContent> createState() => _AyahSheetContentState();
@@ -112,7 +122,12 @@ class _AyahSheetContentState extends State<_AyahSheetContent> {
               child: Center(child: CircularProgressIndicator()),
             );
           }
-          return _AyahSheetBody(data: data);
+          return _AyahSheetBody(
+            data: data,
+            ayahKey: widget.ayahKey,
+            repository: widget.repository,
+            tafsirRepository: widget.tafsirRepository,
+          );
         },
       ),
     );
@@ -161,9 +176,17 @@ class _SheetShell extends StatelessWidget {
 }
 
 class _AyahSheetBody extends StatelessWidget {
-  const _AyahSheetBody({required this.data});
+  const _AyahSheetBody({
+    required this.data,
+    required this.ayahKey,
+    required this.repository,
+    required this.tafsirRepository,
+  });
 
   final _AyahData data;
+  final String ayahKey;
+  final QuranRepository repository;
+  final TafsirRepository tafsirRepository;
 
   @override
   Widget build(BuildContext context) {
@@ -173,13 +196,20 @@ class _AyahSheetBody extends StatelessWidget {
       children: [
         _Header(surah: data.surah, ayahNumber: data.ayahNumber),
         const SizedBox(height: 12),
-        _AyahText(words: data.words, pageByWordIndex: data.pageNumberByWordIndex),
+        QuranAyahText(
+          words: data.words,
+          pageByWordIndex: data.pageNumberByWordIndex,
+        ),
         const SizedBox(height: 12),
         const Divider(height: 1),
         _StudyTabsRow(activeTab: activeTab),
         _StudyTabPlaceholder(tab: activeTab),
         const Divider(height: 1),
-        const _ActionsRow(),
+        _ActionsRow(
+          ayahKey: ayahKey,
+          repository: repository,
+          tafsirRepository: tafsirRepository,
+        ),
         const SizedBox(height: 4),
         const _AudioRow(),
       ],
@@ -225,46 +255,6 @@ class _Header extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// The selected ayah's own words, each rendered with *its own page's* QCF
-/// font (spec §7 — a page-boundary ayah's words can come from two
-/// different page fonts, never assumed to share one). Unlike the fixed
-/// single Mushaf line (rule #2), this is a normal wrapping paragraph — a
-/// different UI surface (a contextual excerpt in a panel, not the Mushaf
-/// page itself), so wrapping here doesn't conflict with that rule.
-class _AyahText extends StatelessWidget {
-  const _AyahText({required this.words, required this.pageByWordIndex});
-
-  final List<Word> words;
-  final Map<int, int> pageByWordIndex;
-
-  @override
-  Widget build(BuildContext context) {
-    final spans = <InlineSpan>[];
-    for (var i = 0; i < words.length; i++) {
-      final word = words[i];
-      final pageNumber = pageByWordIndex[word.wordIndex];
-      spans.add(
-        TextSpan(
-          text: word.text,
-          style: TextStyle(
-            fontFamily: pageNumber == null
-                ? null
-                : fontFamilyForPage(pageNumber),
-            fontSize: 26,
-            height: 1.8,
-            color: mushafInkColor,
-          ),
-        ),
-      );
-      if (i != words.length - 1) spans.add(const TextSpan(text: ' '));
-    }
-    return Directionality(
-      textDirection: TextDirection.rtl,
-      child: Text.rich(TextSpan(children: spans), textAlign: TextAlign.center),
     );
   }
 }
@@ -348,26 +338,38 @@ class _StudyTabPlaceholder extends StatelessWidget {
 }
 
 class _ActionsRow extends StatelessWidget {
-  const _ActionsRow();
+  const _ActionsRow({
+    required this.ayahKey,
+    required this.repository,
+    required this.tafsirRepository,
+  });
+
+  final String ayahKey;
+  final QuranRepository repository;
+  final TafsirRepository tafsirRepository;
 
   @override
   Widget build(BuildContext context) {
-    Widget action(IconData icon, String label) {
+    Widget action(IconData icon, String label, {VoidCallback? onPressed}) {
+      final bool enabled = onPressed != null;
       return Expanded(
         child: Tooltip(
-          message: 'قريبًا',
+          message: enabled ? label : 'قريبًا',
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                onPressed: null,
-                icon: Icon(icon, color: mushafInkColor.withValues(alpha: 0.4)),
+                onPressed: onPressed,
+                icon: Icon(
+                  icon,
+                  color: mushafInkColor.withValues(alpha: enabled ? 1.0 : 0.4),
+                ),
               ),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 11,
-                  color: mushafInkColor.withValues(alpha: 0.4),
+                  color: mushafInkColor.withValues(alpha: enabled ? 1.0 : 0.4),
                 ),
               ),
             ],
@@ -378,7 +380,32 @@ class _ActionsRow extends StatelessWidget {
 
     return Row(
       children: [
-        action(Icons.menu_book_outlined, 'تفسير'),
+        action(
+          Icons.menu_book_outlined,
+          'تفسير',
+          // spec §11: "Tafsir open: Tafsir reader replaces/extends the
+          // context layer without losing ayah identity" — a normal
+          // Navigator.push (a full screen, not another sheet, per
+          // TafsirScreen's own doc comment), with the same
+          // QuranReaderProvider instance handed in explicitly so
+          // TafsirScreen's Previous/Next navigation can keep the Mushaf's
+          // own selection in sync (a route pushed this way isn't a
+          // descendant of the ChangeNotifierProvider wrapping the reader,
+          // so `Provider.of`/`context.read` wouldn't find it there).
+          onPressed: () {
+            final quranReaderProvider = context.read<QuranReaderProvider>();
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => TafsirScreen(
+                  initialAyahKey: ayahKey,
+                  quranRepository: repository,
+                  tafsirRepository: tafsirRepository,
+                  quranReaderProvider: quranReaderProvider,
+                ),
+              ),
+            );
+          },
+        ),
         action(Icons.edit_note_outlined, 'ملاحظة'),
         action(Icons.bookmark_border, 'إشارة مرجعية'),
         action(Icons.subdirectory_arrow_left_outlined, 'متابعة'),
