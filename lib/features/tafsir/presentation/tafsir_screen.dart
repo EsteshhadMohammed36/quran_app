@@ -52,7 +52,14 @@ class TafsirScreen extends StatefulWidget {
 
 class _TafsirScreenState extends State<TafsirScreen> {
   late String _ayahKey = widget.initialAyahKey;
-  double _fontSize = 18;
+
+  // Fixed content font size (spec §11.1 lists a font size control, but the
+  // user found the "-A"/"A+" slider row visually unwanted and asked for it
+  // to be removed, 2026-09-12 — a UI-only call, not a content/data change,
+  // so it doesn't touch CLAUDE.md's non-negotiable rules). Kept as a
+  // constant here (rather than deleted outright) so _SourceContent's font
+  // size still comes from one named place instead of a bare literal.
+  static const double _fontSize = 18;
 
   // Classic single-open accordion: at most one source's content is shown
   // at a time (spec §11.1's single global "Search control" only makes
@@ -158,10 +165,6 @@ class _TafsirScreenState extends State<TafsirScreen> {
             _AyahNavigationRow(
               onPrevious: canGoPrevious ? () => _stepAyah(-1) : null,
               onNext: canGoNext ? () => _stepAyah(1) : null,
-            ),
-            _FontSizeControl(
-              fontSize: _fontSize,
-              onChanged: (value) => setState(() => _fontSize = value),
             ),
             const Divider(height: 1),
             Expanded(
@@ -318,39 +321,6 @@ class _AyahNavigationRow extends StatelessWidget {
           icon: const Icon(Icons.arrow_back),
         ),
       ],
-    );
-  }
-}
-
-class _FontSizeControl extends StatelessWidget {
-  const _FontSizeControl({required this.fontSize, required this.onChanged});
-
-  final double fontSize;
-  final ValueChanged<double> onChanged;
-
-  static const double _min = 14;
-  static const double _max = 28;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          const Icon(Icons.text_decrease, color: mushafInkColor, size: 18),
-          Expanded(
-            child: Slider(
-              value: fontSize.clamp(_min, _max),
-              min: _min,
-              max: _max,
-              divisions: 7,
-              label: fontSize.toStringAsFixed(0),
-              onChanged: onChanged,
-            ),
-          ),
-          const Icon(Icons.text_increase, color: mushafInkColor, size: 18),
-        ],
-      ),
     );
   }
 }

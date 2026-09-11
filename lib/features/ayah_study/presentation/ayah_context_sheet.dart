@@ -7,7 +7,10 @@ import '../../quran_reader/domain/quran_repository.dart';
 import '../../quran_reader/domain/surah.dart';
 import '../../quran_reader/domain/word.dart';
 import '../../quran_reader/presentation/quran_reader_provider.dart';
+import '../../tafsir/domain/tafsir_entry.dart';
 import '../../tafsir/domain/tafsir_repository.dart';
+import '../../tafsir/domain/tafsir_source.dart';
+import '../../tafsir/presentation/tafsir_html_text.dart';
 import '../../tafsir/presentation/tafsir_screen.dart';
 
 /// The Ayah Context Sheet (spec §10): opens under
@@ -203,7 +206,19 @@ class _AyahSheetBody extends StatelessWidget {
         const SizedBox(height: 12),
         const Divider(height: 1),
         _StudyTabsRow(activeTab: activeTab),
-        _StudyTabPlaceholder(tab: activeTab),
+        switch (activeTab) {
+          // Grammar (spec §13 i'rab) reads the already-ingested Iraab
+          // Al-Muyassar tafsir source directly (see [iraabMuyassarSourceId]'s
+          // doc comment) rather than a placeholder — Meaning/Morphology stay
+          // placeholders (Meaning is a later prompt; Morphology's root/lemma/
+          // stem ingestion is still blocked on two corrupted raw_resources
+          // downloads, 2026-09-12).
+          StudyTab.grammar => _GrammarTabContent(
+              ayahKey: ayahKey,
+              tafsirRepository: tafsirRepository,
+            ),
+          _ => _StudyTabPlaceholder(tab: activeTab),
+        },
         const Divider(height: 1),
         _ActionsRow(
           ayahKey: ayahKey,
@@ -301,8 +316,14 @@ class _StudyTabsRow extends StatelessWidget {
       child: Row(
         children: [
           tabButton('المعنى', StudyTab.meaning),
-          tabButton('الإعراب', StudyTab.morphology),
-          tabButton('النحو', StudyTab.grammar),
+          // Renamed 2026-09-12 (was "الإعراب"/"النحو", swapped from spec
+          // §12/§13's actual meaning): StudyTab.morphology is root/lemma/
+          // stem/POS (spec §12) — "الصرف" in Arabic, not "الإعراب". "الإعراب"
+          // is specifically syntactic/grammatical parsing (spec §13),
+          // matching the already-ingested Iraab Al-Muyassar source, so it
+          // belongs on StudyTab.grammar instead.
+          tabButton('الصرف', StudyTab.morphology),
+          tabButton('الإعراب', StudyTab.grammar),
           // Qiraat is explicitly "(future)" in spec §10 — shown, not built.
           tabButton('القراءات', null),
         ],
@@ -319,11 +340,13 @@ class _StudyTabPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Non-blocking "not available yet" state (spec §20) — real content
-    // arrives in later prompts (Tafsir/Morphology feature modules).
+    // arrives in later prompts. Grammar (§13/i'rab) is no longer a
+    // placeholder — see [_GrammarTabContent] — so it's not listed here.
     final String message = switch (tab) {
       StudyTab.meaning => 'معنى الآية غير متاح بعد.',
-      StudyTab.morphology => 'تحليل الإعراب غير متاح بعد.',
-      StudyTab.grammar => 'شرح النحو غير متاح بعد.',
+      StudyTab.morphology => 'تحليل الصرف غير متاح بعد.',
+      StudyTab.grammar =>
+        throw StateError('Grammar tab has real content — see _GrammarTabContent.'),
     };
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 20),
@@ -333,6 +356,77 @@ class _StudyTabPlaceholder extends StatelessWidget {
           style: TextStyle(color: mushafInkColor.withValues(alpha: 0.55)),
         ),
       ),
+    );
+  }
+}
+
+/// The "الإعراب" (Grammar/I'rab, spec §13) study tab's real content:
+/// Iraab Al-Muyassar's entry for the selected ayah, read straight from the
+/// tafsir module's own repository/table (see [iraabMuyassarSourceId]) — spec
+/// §13 requires this to stay a distinct data source from both Tafsir's own
+/// screen and from Morphology, and to name that source explicitly, which
+/// this widget does via its header line.
+class _GrammarTabContent extends StatelessWidget {
+  const _GrammarTabContent({
+    required this.ayahKey,
+    required this.tafsirRepository,
+  });
+
+  final String ayahKey;
+  final TafsirRepository tafsirRepository;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<TafsirEntry>(
+      future: tafsirRepository.getEntry(iraabMuyassarSourceId, ayahKey),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Center(child: Text('خطأ: ${snapshot.error}')),
+          );
+        }
+        final entry = snapshot.data;
+        if (entry == null) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final content = entry.content;
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                entry.isMultiAyahGroup
+                    ? 'الإعراب الميسر • الآيات ${entry.groupAyahStart} - '
+                        '${entry.groupAyahEnd}'
+                    : 'الإعراب الميسر',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: mushafInkColor.withValues(alpha: 0.7),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                content == null
+                    ? 'لا يوجد إعراب مستقل لهذه الآية في هذا المصدر.'
+                    : stripTafsirHtml(content),
+                style: TextStyle(
+                  fontSize: 15,
+                  height: 1.6,
+                  color: mushafInkColor,
+                  fontStyle:
+                      content == null ? FontStyle.italic : FontStyle.normal,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
