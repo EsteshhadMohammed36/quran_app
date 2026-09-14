@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../ayah_study/presentation/ayah_context_sheet.dart';
+import '../../morphology/data/sqlite_morphology_repository.dart';
+import '../../morphology/domain/morphology_repository.dart';
 import '../../tafsir/data/sqlite_tafsir_repository.dart';
 import '../../tafsir/domain/tafsir_repository.dart';
 import '../data/sqlite_quran_repository.dart';
@@ -37,6 +39,8 @@ class MushafReaderScreen extends StatefulWidget {
 class _MushafReaderScreenState extends State<MushafReaderScreen> {
   final QuranRepository _repository = SqliteQuranRepository();
   final TafsirRepository _tafsirRepository = SqliteTafsirRepository();
+  final MorphologyRepository _morphologyRepository =
+      SqliteMorphologyRepository();
   QuranReaderProvider? _provider;
   PageController? _pageController;
   Object? _initError;
@@ -112,6 +116,7 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
               ? AyahContextSheet(
                   repository: _repository,
                   tafsirRepository: _tafsirRepository,
+                  morphologyRepository: _morphologyRepository,
                 )
               : null,
         ),

@@ -6,10 +6,16 @@ import '../domain/mushaf_page.dart';
 import '../domain/quran_repository.dart';
 import '../domain/word.dart';
 
-/// The Ayah Context Sheet's study tabs (spec §10: "Meaning, Morphology,
-/// Grammar, Qiraat (future)"). Qiraat has no tab content at all yet — it's
-/// listed in the UI as a future placeholder, not a selectable tab.
-enum StudyTab { meaning, morphology, grammar }
+/// The Ayah Context Sheet's study tabs. Spec §10 originally specified
+/// "Meaning, Morphology, Grammar, Qiraat (future)", but the user asked to
+/// drop the still-unbuilt Meaning tab in favor of surfacing Tafsir as a
+/// tab too (2026-09-13: "عاوزة التاب بتاعة المعني تستبدل بتاب التفسير
+/// اللي تحت ... يكون كلمة الاعراب والتفسير جنب بعض") — spec §10 still lists
+/// Tafsir only as a bottom action, not a tab; this is a deliberate,
+/// explicit deviation, not an oversight. Qiraat still has no tab content
+/// at all — it's listed in the UI as a future placeholder, not a
+/// selectable tab.
+enum StudyTab { tafsir, morphology, grammar }
 
 /// App state for the Mushaf reader (spec §17.1 `QuranReaderProvider`):
 /// which page is showing, which ayah is selected, and a small lazily
@@ -55,7 +61,7 @@ class QuranReaderProvider extends ChangeNotifier {
   bool _isAyahSheetOpen = false;
   bool get isAyahSheetOpen => _isAyahSheetOpen;
 
-  StudyTab _activeStudyTab = StudyTab.meaning;
+  StudyTab _activeStudyTab = StudyTab.tafsir;
   StudyTab get activeStudyTab => _activeStudyTab;
 
   void setActiveStudyTab(StudyTab tab) {
@@ -149,7 +155,7 @@ class QuranReaderProvider extends ChangeNotifier {
     if (_selectedAyahKey == null && !_isAyahSheetOpen) return;
     _selectedAyahKey = null;
     _isAyahSheetOpen = false;
-    _activeStudyTab = StudyTab.meaning;
+    _activeStudyTab = StudyTab.tafsir;
     notifyListeners();
   }
 }

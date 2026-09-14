@@ -48,6 +48,17 @@ CREATE TABLE ayahs (
 /// `word_index` is the global ordinal used by the Mushaf renderer pipeline
 /// (§6.2: "query words where word_index BETWEEN first_word_id AND last_word_id").
 /// `text` is canonical QPC glyph text — never transform it (§22).
+/// `word_type` is one of: 'word' | 'end_marker' — same convention as
+/// `mushaf_lines.line_type`. The qpc-v2 script resource stores the ayah-end
+/// ornament (the circled ayah number every ayah ends with) as one extra
+/// "word" row per ayah, always at the highest `word_position` — a real
+/// rendering requirement (rule #2: the Mushaf line must show it), but not a
+/// real Quran word, and it must never be treated as one for word-level
+/// linguistic features (found via Prompt 12's Morphology tab wrongly giving
+/// it a morphology card, spec §12). Computed once at ingestion time
+/// (`tool/ingest_quran_data.dart`'s `_buildWords`) as the last position per
+/// ayah, so every feature that needs "real words only" filters on this
+/// column instead of re-deriving the same position-based rule itself.
 const String createWordsTable = '''
 CREATE TABLE words (
   surah_id INTEGER NOT NULL,
@@ -56,6 +67,7 @@ CREATE TABLE words (
   word_key TEXT NOT NULL UNIQUE,
   word_index INTEGER NOT NULL UNIQUE,
   text TEXT NOT NULL,
+  word_type TEXT NOT NULL DEFAULT 'word',
   page_number INTEGER,
   juz_number INTEGER,
   hizb_number INTEGER,
