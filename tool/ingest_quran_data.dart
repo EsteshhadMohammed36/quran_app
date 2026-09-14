@@ -2,7 +2,8 @@
 //
 // Data ingestion pipeline (spec §23) for the Phase 0 Mushaf prototype
 // resource set (compatibility_group `madinah-v2-qpc-v2-hafs`) and — since
-// Prompt 11 — the Tafsir module (spec §11).
+// Prompt 11 — the Tafsir module (spec §11), and — since Prompt 12 — the
+// Morphology module (spec §12).
 //
 // Reads the 4 raw QUL resources from `raw_resources/` (git-ignored, see
 // tool/resource_manifest_seed.dart for exactly what/why), transforms field
@@ -17,6 +18,15 @@
 // Prompt 11 added 3 more raw QUL resources (Ibn Kathir, As-Saadi, Iraab
 // Al-Muyassar — all Arabic tafsir) into the same single-pass pipeline, so
 // the app still bundles exactly one combined database file (spec §15).
+//
+// Prompt 12 (spec §12) added a further 3 raw QUL resources (word-level
+// root/lemma/stem, the "Word by word" variants) into the same pipeline,
+// populating the already-existing `morphology` table (schema.dart) with
+// one row per `words` row — root/lemma/stem populated where the source
+// data has them, NULL otherwise (a word without a root, e.g. most
+// particles, isn't an ingestion gap). `part_of_speech`/`grammar_tags`
+// stay NULL throughout: no POS/grammar-tag resource was found alongside
+// these on QUL (spec §12.2 "(when available)").
 //
 // Run from the repo root:
 //   dart run tool/ingest_quran_data.dart
@@ -59,6 +69,14 @@ const String _saadiZipName = 'ar-tafseer-al-saddi.db.zip';
 const String _saadiDbInnerName = 'ar-tafseer-al-saddi.db';
 const String _iraabZipName = 'al-i-rab-al-muyassar.db.zip';
 const String _iraabDbInnerName = 'al-i-rab-al-muyassar.db';
+
+// --- Morphology module (Prompt 12, spec §12) --------------------------------
+const String _wordRootZipName = 'word-root.db.zip';
+const String _wordRootDbInnerName = 'word-root.db';
+const String _wordLemmaZipName = 'word-lemma.db.zip';
+const String _wordLemmaDbInnerName = 'word-lemma.db';
+const String _wordStemZipName = 'word-stem.db.zip';
+const String _wordStemDbInnerName = 'word-stem.db';
 
 /// The `tafsir_sources` registry rows. Not derived from any downloaded
 /// file — each source's name/author is hardcoded here, same treatment as
@@ -133,6 +151,21 @@ Future<void> main(List<String> args) async {
       entryName: _iraabDbInnerName,
       outDir: work,
     );
+    final File wordRootDb = _extractSingleEntry(
+      zip: File('${rawDir.path}/$_wordRootZipName'),
+      entryName: _wordRootDbInnerName,
+      outDir: work,
+    );
+    final File wordLemmaDb = _extractSingleEntry(
+      zip: File('${rawDir.path}/$_wordLemmaZipName'),
+      entryName: _wordLemmaDbInnerName,
+      outDir: work,
+    );
+    final File wordStemDb = _extractSingleEntry(
+      zip: File('${rawDir.path}/$_wordStemZipName'),
+      entryName: _wordStemDbInnerName,
+      outDir: work,
+    );
 
     print('Reading source data...');
     final List<Map<String, dynamic>> wordRows = _querySqliteJson(
@@ -159,12 +192,32 @@ Future<void> main(List<String> args) async {
       iraabDb.path,
       'SELECT ayah_key, group_ayah_key, from_ayah, to_ayah, text FROM tafsir;',
     );
+    // Each of these joins the word-location junction table back to its
+    // parent dictionary table to get the actual root/lemma/stem text in one
+    // query, rather than carrying the id indirection into Dart.
+    final List<Map<String, dynamic>> rootRows = _querySqliteJson(
+      wordRootDb.path,
+      'SELECT rw.word_location AS word_location, r.arabic_trilateral AS text '
+      'FROM root_words rw JOIN roots r ON rw.root_id = r.id;',
+    );
+    final List<Map<String, dynamic>> lemmaRows = _querySqliteJson(
+      wordLemmaDb.path,
+      'SELECT lw.word_location AS word_location, l.text AS text '
+      'FROM lemma_words lw JOIN lemmas l ON lw.lemma_id = l.id;',
+    );
+    final List<Map<String, dynamic>> stemRows = _querySqliteJson(
+      wordStemDb.path,
+      'SELECT sw.word_location AS word_location, s.text AS text '
+      'FROM stem_words sw JOIN stems s ON sw.stem_id = s.id;',
+    );
 
     print(
       'Loaded ${wordRows.length} words, ${pageRows.length} mushaf lines, '
       '${surahNamesRaw.length} surah name entries, '
       '${ibnKathirRows.length} + ${saadiRows.length} + ${iraabRows.length} '
-      'tafsir rows (Ibn Kathir / As-Saadi / Iraab Al-Muyassar).',
+      'tafsir rows (Ibn Kathir / As-Saadi / Iraab Al-Muyassar), '
+      '${rootRows.length} + ${lemmaRows.length} + ${stemRows.length} '
+      'morphology word-location rows (root / lemma / stem).',
     );
 
     print('Verifying word glyph text byte-for-byte against source...');
@@ -189,6 +242,12 @@ Future<void> main(List<String> args) async {
         iraabRows,
       ),
     };
+    final List<Map<String, Object?>> morphology = _buildMorphology(
+      words: words,
+      rootRows: rootRows,
+      lemmaRows: lemmaRows,
+      stemRows: stemRows,
+    );
 
     print('Running integrity checks (spec §24)...');
     final List<String> failures = _runIntegrityChecks(
@@ -204,6 +263,15 @@ Future<void> main(List<String> args) async {
         tafsirEntriesBySource: tafsirEntriesBySource,
       ),
     );
+    failures.addAll(
+      _runMorphologyIntegrityChecks(
+        words: words,
+        rootRows: rootRows,
+        lemmaRows: lemmaRows,
+        stemRows: stemRows,
+        morphology: morphology,
+      ),
+    );
     if (failures.isNotEmpty) {
       _fail(
         'Integrity checks failed (${failures.length}):\n'
@@ -215,6 +283,7 @@ Future<void> main(List<String> args) async {
 
     final DateTime retrievedAt = DateTime(2026, 8, 30);
     final DateTime tafsirRetrievedAt = DateTime(2026, 9, 11);
+    final DateTime morphologyRetrievedAt = DateTime(2026, 9, 13);
     final List<Map<String, Object?>> manifestRows = [
       ...phase0ResourceManifestSeed.map(
         (ResourceManifestEntry e) =>
@@ -223,6 +292,10 @@ Future<void> main(List<String> args) async {
       ...tafsirModuleResourceManifestSeed.map(
         (ResourceManifestEntry e) =>
             e.copyWith(retrievedAt: tafsirRetrievedAt).toMap(),
+      ),
+      ...morphologyModuleResourceManifestSeed.map(
+        (ResourceManifestEntry e) =>
+            e.copyWith(retrievedAt: morphologyRetrievedAt).toMap(),
       ),
     ];
 
@@ -238,6 +311,7 @@ Future<void> main(List<String> args) async {
       mushafLines: mushafLines,
       tafsirSources: _tafsirSources,
       tafsirEntries: allTafsirEntries,
+      morphology: morphology,
       resourceManifest: manifestRows,
     );
 
@@ -254,6 +328,7 @@ Future<void> main(List<String> args) async {
       expectedMushafLines: mushafLines.length,
       expectedTafsirSources: _tafsirSources.length,
       expectedTafsirEntries: allTafsirEntries.length,
+      expectedMorphology: morphology.length,
       expectedManifestRows: manifestRows.length,
     );
 
@@ -414,7 +489,30 @@ List<Map<String, Object?>> _buildSurahs(Map<String, dynamic> surahNamesRaw) {
   return result;
 }
 
+/// The qpc-v2 script resource stores the ayah-end ornament (the circled
+/// ayah number every ayah ends with) as one extra "word" row per ayah,
+/// always the highest `word` position in that ayah — confirmed by
+/// cross-checking against the independently-sourced word-root/word-lemma/
+/// word-stem resources (Prompt 12, spec §12), whose own word numbering
+/// stops one position earlier for the same ayah in the overwhelming
+/// majority of cases, and by an independent sanity total: 83668 words -
+/// 6236 ayahs (one marker each) = 77432, matching the Quran's widely-cited
+/// ~77,430 total word count. A real Mushaf-rendering requirement (rule
+/// #2 — the line must show it) but not a real Quran word, so it's tagged
+/// `word_type: 'end_marker'` here, once, rather than leaving every
+/// word-level feature (e.g. Morphology) to re-derive "is this the last
+/// position" itself.
 List<Map<String, Object?>> _buildWords(List<Map<String, dynamic>> wordRows) {
+  final Map<String, int> maxPositionByAyah = {};
+  for (final w in wordRows) {
+    final String ayahKey = '${w['surah']}:${w['ayah']}';
+    final int position = w['word'] as int;
+    final int? current = maxPositionByAyah[ayahKey];
+    if (current == null || position > current) {
+      maxPositionByAyah[ayahKey] = position;
+    }
+  }
+
   return wordRows
       .map(
         (w) => {
@@ -428,6 +526,10 @@ List<Map<String, Object?>> _buildWords(List<Map<String, dynamic>> wordRows) {
           // are page-specific presentation-form glyphs tied to the QPC V2
           // font, not generic Unicode Uthmani text.
           'text': w['text'] as String,
+          'word_type': (w['word'] as int) ==
+                  maxPositionByAyah['${w['surah']}:${w['ayah']}']
+              ? 'end_marker'
+              : 'word',
           'page_number': null,
           'juz_number': null,
           'hizb_number': null,
@@ -566,6 +668,52 @@ List<Map<String, Object?>> _buildTafsirEntries(
   return result;
 }
 
+/// Builds one `morphology` row per `words` row (schema.dart's `morphology`
+/// table FKs onto `words` by `(surah_id, ayah_number, word_position)`, so
+/// every word gets a row here — not just words that happen to have a
+/// root/lemma/stem). `rootRows`/`lemmaRows`/`stemRows` are each
+/// `{word_location, text}` pairs already joined back to their dictionary
+/// table (see the 3 `_querySqliteJson` calls in `main`); `word_location`
+/// uses the exact same `surah:ayah:word` format as `words.word_key`
+/// (verified directly against both source files), so no reformatting is
+/// needed to key the lookup.
+///
+/// A word with no row in one of the 3 maps (e.g. most particles have no
+/// root) gets `null` for that column — a real linguistic fact, not a gap
+/// to paper over (CLAUDE.md rule #1's spirit: never invent data).
+List<Map<String, Object?>> _buildMorphology({
+  required List<Map<String, Object?>> words,
+  required List<Map<String, dynamic>> rootRows,
+  required List<Map<String, dynamic>> lemmaRows,
+  required List<Map<String, dynamic>> stemRows,
+}) {
+  Map<String, String> byLocation(List<Map<String, dynamic>> rows) => {
+    for (final r in rows) r['word_location'] as String: r['text'] as String,
+  };
+  final Map<String, String> rootByLocation = byLocation(rootRows);
+  final Map<String, String> lemmaByLocation = byLocation(lemmaRows);
+  final Map<String, String> stemByLocation = byLocation(stemRows);
+
+  return words.map((w) {
+    final String wordKey = w['word_key'] as String;
+    return {
+      'surah_id': w['surah_id'] as int,
+      'ayah_number': w['ayah_number'] as int,
+      'word_position': w['word_position'] as int,
+      'word_key': wordKey,
+      'root': rootByLocation[wordKey],
+      'lemma': lemmaByLocation[wordKey],
+      'stem': stemByLocation[wordKey],
+      // No POS/grammar-tag resource available alongside these on QUL
+      // (spec §12.2 "(when available)") — left null, not derived from
+      // anything else (spec §13's own warning against mislabeling a POS
+      // tag as grammar analysis applies here too, in spirit).
+      'part_of_speech': null,
+      'grammar_tags': null,
+    };
+  }).toList();
+}
+
 // ---------------------------------------------------------------------------
 // Integrity checks (spec §24)
 // ---------------------------------------------------------------------------
@@ -590,9 +738,11 @@ List<String> _runIntegrityChecks({
     for (final s in surahs) s['surah_id'] as int: s['ayah_count'] as int,
   };
   final Map<String, List<int>> wordPositionsByAyah = {};
+  final Map<String, List<Map<String, Object?>>> wordRowsByAyah = {};
   for (final w in words) {
     final String key = '${w['surah_id']}:${w['ayah_number']}';
     (wordPositionsByAyah[key] ??= []).add(w['word_position'] as int);
+    (wordRowsByAyah[key] ??= []).add(w);
   }
   final Map<int, int> actualAyahCountBySurah = {};
   final Set<String> ayahKeysSeen = {};
@@ -634,6 +784,31 @@ List<String> _runIntegrityChecks({
       failures.add('Orphan words for ayah $ayahKey: no matching surah.');
     } else if (!ayahKeysSeen.contains(ayahKey)) {
       failures.add('Orphan words for ayah $ayahKey: no matching ayahs row.');
+    }
+  });
+
+  // `word_type`: exactly one 'end_marker' per ayah (the ayah-end ornament,
+  // see `_buildWords`'s doc comment), and it must be that ayah's highest
+  // word_position — never a real word wrongly tagged, never a real word
+  // left untagged.
+  wordRowsByAyah.forEach((ayahKey, rows) {
+    final List<Map<String, Object?>> markers =
+        rows.where((r) => r['word_type'] == 'end_marker').toList();
+    if (markers.length != 1) {
+      failures.add(
+        "Ayah $ayahKey has ${markers.length} 'end_marker' word(s) "
+        '(expected exactly 1).',
+      );
+    } else {
+      final int markerPosition = markers.single['word_position'] as int;
+      final int maxPosition =
+          rows.map((r) => r['word_position'] as int).reduce((a, b) => a > b ? a : b);
+      if (markerPosition != maxPosition) {
+        failures.add(
+          "Ayah $ayahKey's 'end_marker' is at position $markerPosition, "
+          'but its highest word_position is $maxPosition.',
+        );
+      }
     }
   });
 
@@ -854,6 +1029,71 @@ List<String> _runTafsirIntegrityChecks({
   return failures;
 }
 
+/// Cheap sanity check that a root/lemma/stem's own text actually looks like
+/// Arabic script — same class of second-line-of-defense check as
+/// `_arabicScriptPattern` is for tafsir content, guarding against the same
+/// encoding-mishandling bug class this pipeline already found and fixed
+/// once (CLAUDE.md "Current phase"). `_querySqliteJson` already forces
+/// UTF-8 decoding, so this isn't expected to ever fire.
+List<String> _runMorphologyIntegrityChecks({
+  required List<Map<String, Object?>> words,
+  required List<Map<String, dynamic>> rootRows,
+  required List<Map<String, dynamic>> lemmaRows,
+  required List<Map<String, dynamic>> stemRows,
+  required List<Map<String, Object?>> morphology,
+}) {
+  final List<String> failures = [];
+  final Set<String> wordKeys = words.map((w) => w['word_key'] as String).toSet();
+
+  if (morphology.length != words.length) {
+    failures.add(
+      'morphology row count (${morphology.length}) does not match words row '
+      'count (${words.length}) — expected exactly one morphology row per '
+      'word.',
+    );
+  }
+
+  void checkSourceRows(String label, List<Map<String, dynamic>> rows) {
+    final Set<String> seenLocations = {};
+    for (final r in rows) {
+      final String location = r['word_location'] as String;
+      final String text = r['text'] as String;
+      if (!seenLocations.add(location)) {
+        failures.add(
+          'Morphology source "$label": word_location "$location" appears '
+          'more than once (expected at most one $label per word).',
+        );
+      }
+      if (!wordKeys.contains(location)) {
+        failures.add(
+          'Morphology source "$label": word_location "$location" does not '
+          'match any word_key in words.',
+        );
+      }
+      if (!_arabicScriptPattern.hasMatch(text)) {
+        failures.add(
+          'Morphology source "$label": text for "$location" has no '
+          'Arabic-script characters ("$text").',
+        );
+      }
+    }
+  }
+
+  checkSourceRows('root', rootRows);
+  checkSourceRows('lemma', lemmaRows);
+  checkSourceRows('stem', stemRows);
+
+  final Set<String> seenMorphologyKeys = {};
+  for (final m in morphology) {
+    final String wordKey = m['word_key'] as String;
+    if (!seenMorphologyKeys.add(wordKey)) {
+      failures.add('Duplicate morphology row for word_key "$wordKey".');
+    }
+  }
+
+  return failures;
+}
+
 // ---------------------------------------------------------------------------
 // SQL generation
 // ---------------------------------------------------------------------------
@@ -878,6 +1118,7 @@ String _buildSqlScript({
   required List<Map<String, Object?>> mushafLines,
   required List<Map<String, Object?>> tafsirSources,
   required List<Map<String, Object?>> tafsirEntries,
+  required List<Map<String, Object?>> morphology,
   required List<Map<String, Object?>> resourceManifest,
 }) {
   final StringBuffer sql = StringBuffer();
@@ -910,6 +1151,9 @@ String _buildSqlScript({
   for (final row in tafsirEntries) {
     sql.writeln(_insertStatement('tafsir_entries', row));
   }
+  for (final row in morphology) {
+    sql.writeln(_insertStatement('morphology', row));
+  }
   for (final row in resourceManifest) {
     sql.writeln(_insertStatement('resource_manifest', row));
   }
@@ -929,6 +1173,7 @@ void _verifyWrittenDatabase({
   required int expectedMushafLines,
   required int expectedTafsirSources,
   required int expectedTafsirEntries,
+  required int expectedMorphology,
   required int expectedManifestRows,
 }) {
   final Map<String, int> expected = {
@@ -938,6 +1183,7 @@ void _verifyWrittenDatabase({
     'mushaf_lines': expectedMushafLines,
     'tafsir_sources': expectedTafsirSources,
     'tafsir_entries': expectedTafsirEntries,
+    'morphology': expectedMorphology,
     'resource_manifest': expectedManifestRows,
   };
   for (final entry in expected.entries) {

@@ -265,8 +265,13 @@ QUL/SQLite rows directly. State management: Provider (spec §17.1).
     further on-device interaction, confirmed unrelated to the app itself
     since even the Android home screen stopped responding to `adb input
     tap` at the same time `adb input keyevent` kept working).
-  - [ ] Morphology Module (Prompt 12, spec §12/§12.1/§12.2) — **in
-    progress, blocked on data**. Two of the three raw_resources downloads
+  - [x] Morphology Module (Prompt 12, spec §12/§12.1/§12.2) — root/lemma/
+    stem now populated for real (see the 2026-09-14 entry below for how the
+    data blocker resolved and how ingestion/wiring finished); `part_of_
+    speech`/`grammar_tags` stay permanently NULL, matching spec §12.2's own
+    "(when available)" — no such resource exists on QUL to pair with these
+    three. What follows is the original, still-accurate build history.
+    Two of the three raw_resources downloads
     needed for root/lemma/stem ingestion (`word-lemma.db.zip`,
     `word-stem.db.zip`) fail a zip integrity check (no EOCD record —
     truncated/corrupted download); `word-root.db.zip` alone is fine
@@ -297,6 +302,212 @@ QUL/SQLite rows directly. State management: Provider (spec §17.1).
     emulator: tab labels correct, "الإعراب" shows real i'rab text for
     1:4 ("مالك: صفة رابعة لله"), "الصرف" still shows its not-available
     placeholder.
+  - Two bug fixes to the Ayah Context Sheet found after the above (both
+    2026-09-13, `ayah_context_sheet.dart` only):
+    1. **Overflow.** `_AyahSheetBody` rendered the whole sheet (header,
+       ayah text, tabs, tab content, actions, audio) as one plain
+       `Column` with no height cap; since the sheet is a persistent
+       `Scaffold.bottomSheet` (not modal), a long الإعراب/tafsir passage
+       could push the total past the screen height and throw a
+       `RenderFlex overflowed` error (user-reported). Fixed by capping
+       the sheet at 80% of screen height (`ConstrainedBox`) and making
+       only the variable middle (ayah text + tabs row + active tab
+       content) a `Flexible` + `SingleChildScrollView` — header/actions/
+       audio stay pinned, only the part that can grow arbitrarily long
+       now scrolls internally. Also bumped `_MorphologyTabContent`'s
+       word-card strip from 260px to 300px — `flutter test` surfaced a
+       ~20px internal overflow in `_MorphologyWordCard`'s own column
+       (5 label/value field rows didn't quite fit), a separate bug of
+       the same kind.
+    2. **RTL alignment.** "الإعراب" tab text rendered left-aligned
+       ("مكتوبة من الشمال", user-reported) — `_GrammarTabContent` was the
+       one Arabic text block in the file missing the explicit
+       `Directionality(textDirection: TextDirection.rtl)` wrapper every
+       other Arabic block in the app uses (`QuranAyahText`,
+       `MushafReaderScreen`, `_MorphologyTabContent`'s word text) — the
+       app sets no locale/Directionality globally, so `CrossAxisAlignment
+       .start`/default `TextAlign` resolved to the left. Wrapped it the
+       same way as the rest.
+    Verified on-device (physical Android 15 phone, connected via adb —
+    the Pixel 6 API 34 emulator kept crashing shortly after boot in this
+    session's sandboxed environment; see the next entry for the fix that
+    got it booting headless). `flutter analyze`/`flutter test`: clean
+    (one pre-existing, unrelated test-mechanics failure in
+    `test/morphology_tab_scroll_test.dart` — a drag-distance issue in the
+    test itself, not an overflow — left as-is).
+  - **Data blocker resolved + Morphology ingestion completed** (2026-09-14,
+    continuing the session above). `word-lemma.db.zip`/`word-stem.db.zip`
+    were re-downloaded a third time and finally passed zip integrity —
+    confirmed a download-interruption issue, not a source-side defect
+    (`tool/resource_manifest_seed.dart`'s `morphologyModuleResourceManifestSeed`,
+    3 new rows, documents this). `tool/ingest_quran_data.dart` extended
+    (same single-pass pipeline) to extract all 3 word-root/word-lemma/
+    word-stem resources, join each word-location junction table back to
+    its dictionary table, and populate the already-existing `morphology`
+    table with exactly one row per `words` row — root/lemma/stem `null`
+    where a word genuinely has none (particles, pronouns — most of QUL's
+    own `root_words`/`lemma_words`/`stem_words` tables already skip these),
+    plus new integrity checks (row-count parity with `words`, no duplicate/
+    orphaned `word_location`, an Arabic-script sanity check per entry).
+    `assets/database/quran.db` regenerated (83668 morphology rows; 11
+    resource_manifest rows total).
+    Cross-checked the join's correctness directly against both raw
+    sources with the `sqlite3` CLI (not just trusting the integrity
+    checks passing) after noticing something that looked at first like an
+    off-by-one: `words` (from the qpc-v2 script resource, unrelated to
+    this prompt) stores one extra "word" per ayah beyond the
+    root/lemma/stem resources' own count — e.g. Al-Fatiha 1:1 has 5 rows
+    in `words` but the root resource only goes up to `1:1:4`. Traced this
+    to `words`' *last* position in every ayah being the ayah-end/verse-
+    ornament marker glyph (confirmed pattern-wise: root/lemma's own
+    per-ayah max position is always exactly `words`' max position for
+    that ayah minus 0 or more, never *more* — checked across all 6236
+    ayahs, zero exceptions), not a real word — so the two sources' word
+    numbering does line up correctly for every real word; the marker
+    position simply and correctly gets no root/lemma/stem. Verified
+    against real content, not just position math: e.g. 2:2's root entries
+    at positions 2/4/6/7 resolve to "الكتاب"/"ريب"/"هدى"/"للمتقين" exactly
+    (skipping the demonstrative/negation/preposition words 1/3/5, which
+    have none) — correct. No data bug; false alarm caught before being
+    reported as one.
+    `lib/features/morphology/{domain,data,presentation}` (created earlier
+    this session, before the data blocker above) wired up:
+    `MorphologyEntry`/`MorphologyRepository`/`SqliteMorphologyRepository`
+    per spec §12.2's method set, `MorphologyTabContent` for the "الصرف"
+    tab's horizontal word-card strip.
+    Also found and finished an incomplete refactor from earlier in this
+    same session: `MorphologyTabContent` (`lib/features/morphology/
+    presentation/`) and `GrammarTabContent` (`lib/features/tafsir/
+    presentation/grammar_tab_content.dart`) already existed as standalone
+    files, but `ayah_context_sheet.dart` still had its own private
+    `_MorphologyTabContent`/`_MorphologyWordCard`/`_GrammarTabContent`
+    duplicates — and had kept receiving fixes (the RTL-alignment and
+    300px-height fixes logged above) that never made it into the
+    standalone copies, which the app didn't actually use anywhere. Same
+    risk CLAUDE.md already flagged once for `QuranAyahText` ("rather than
+    risking two copies silently diverging") — here they already had.
+    Resolved by making the standalone files the one real copy (carrying
+    forward the private versions' fixes, since those were the ones
+    actually tested), switching `ayah_context_sheet.dart` to import and
+    use them, and deleting the private duplicates (net -142 lines in that
+    file, now 736).
+    Also root-caused and fixed the pre-existing `test/
+    morphology_tab_scroll_test.dart` failure flagged above as "left
+    as-is" — it wasn't a drag-*distance* issue after all. Instrumented the
+    underlying `ScrollPosition` directly: the test's `Offset(-2000, 0)`
+    drag left the horizontal list's scroll offset at exactly `0.0` (never
+    moved), while `Offset(2000, 0)` drove it straight to
+    `maxScrollExtent`. For a `reverse: true` horizontal list, the drag
+    direction that advances through higher indices is the mirror image of
+    a normal list's convention — the test had that backwards, the widget
+    itself was always correct. Fixed the sign; test now passes.
+    `flutter analyze`/`flutter test`: both fully clean (0 issues, all
+    tests passing) — first time both are clean simultaneously since
+    Prompt 12 started. Verified visually on the Android emulator
+    (`emulator-5554`, fresh debug build): Al-Fatiha 1:4 ("مالك يوم
+    الدين") — "الصرف" tab shows correct root/lemma/stem for الدين (د ي ن)/
+    يوم (ي و م)/مالك (م ل ك) with نوع الكلمة/الوسوم النحوية correctly
+    dashed-out, "الإعراب" tab still shows the correct real i'rab text
+    right-aligned — confirming the extracted widgets work identically to
+    the private versions they replaced.
+    Also deleted 19 stray `scratch_screen*.png` debug screenshots left in
+    the repo root from this session's earlier on-device verification
+    passes, and a stray 0-byte `raw_resources/word-lemma.db` left over
+    from a mid-extraction interruption (both untracked/git-ignored
+    clutter, not part of any deliverable).
+  - **"التفسير" tab replaces "المعنى"** (2026-09-14, user's explicit
+    request: "عاوزة التاب بتاعة المعني تستبدل بتاب التفسير اللي تحت ...
+    يكون كلمة الاعراب والتفسير جنب بعض ... من غير الحاجة التالتة اللي
+    هيا الاعراب الميسر") — a deliberate deviation from spec §10 (which
+    lists Study tabs as "Meaning, Morphology, Grammar, Qiraat (future)"
+    and Tafsir only as a bottom action), not an oversight. `StudyTab
+    .meaning` renamed to `StudyTab.tafsir` (`quran_reader_provider.dart`);
+    tab order/labels in `_StudyTabsRow` are now التفسير, الإعراب, الصرف,
+    القراءات — Tafsir and Grammar adjacent, per the user's ask. New
+    `_TafsirTabContent`/`_TafsirSourceSection`/`_TafsirSourceContent`
+    widgets (`ayah_context_sheet.dart`) show the same already-ingested
+    `TafsirRepository` sources the full-screen `TafsirScreen`/"تفسير"
+    action already use (CLAUDE.md rule #4 — no second copy of the data or
+    query logic) as a single-open accordion, first source expanded by
+    default — but filtered to exclude `iraabMuyassarSourceId`, since that
+    source is shown exclusively on the "الإعراب" tab instead. The now-
+    dead `_StudyTabPlaceholder` class (every `StudyTab` value has real
+    content now) was removed rather than left unreachable.
+    `flutter analyze`/`flutter test`: clean (same one pre-existing
+    failure as above, untouched by this change). Verified visually on the
+    Pixel 6 API 34 emulator — booted headless this time (`-no-window
+    -gpu swiftshader_indirect`) after the normal windowed boot kept
+    getting torn down early in this session's sandboxed environment
+    (`UpdateLayeredWindowIndirect failed ... device ... not functioning`
+    in the emulator's own log — a display-subsystem issue in this
+    session's environment, not the app): tab order/labels correct,
+    التفسير opens by default on a fresh ayah selection with Ibn Kathir
+    expanded, collapsing it reveals only "تفسير السعدي" underneath (no
+    third "الإعراب الميسر" entry), expanding As-Saadi shows its own real
+    content correctly right-aligned, and switching to "الإعراب" still
+    shows the real i'rab text (both prior fixes above still intact).
+  - **Ayah-end marker no longer gets a morphology card** (2026-09-14,
+    user-reported: "الصرف" showed an extra rectangle for the ayah number,
+    e.g. "٣", styled and laid out exactly like a real word's card). This
+    is precisely the ayah-end ornament glyph the "Data blocker resolved"
+    entry above already identified while cross-checking the ingestion —
+    `words` legitimately carries it as one extra row per ayah (real Mushaf
+    rendering requirement, rule #2), but `MorphologyTabContent` was
+    iterating every `words` row with no way to tell it apart from a real
+    word, so it got its own (empty) card.
+    Fixed at the source per the user's explicit ask, not with a per-widget
+    visual filter: `schema.dart`'s `words` table gained a `word_type`
+    column ('word' | 'end_marker', same convention as `mushaf_lines
+    .line_type`), computed once in `tool/ingest_quran_data.dart`'s
+    `_buildWords` as the highest `word_position` in each ayah — the
+    Word/domain model (`word.dart`) now exposes this as `Word.wordType`/
+    `Word.isAyahEndMarker`, so any current or future word-level feature
+    can filter on it without re-deriving the rule. Added a matching
+    integrity check (`_runIntegrityChecks`) asserting exactly one
+    'end_marker' per ayah, always at that ayah's own highest position —
+    turning this session's one-time manual investigation into a
+    permanent, enforced invariant rather than tribal knowledge.
+    That investigation (before writing any fix) chased down what first
+    looked like a real off-by-one in the Prompt 12 ingestion: 3 of 6236
+    ayahs (2:275, 4:176, 13:5 — all famously long ayahs) have the QUL
+    word-lemma resource attach a real lemma value to what is structurally
+    the marker's own position. Verified this is an upstream anomaly in
+    that resource, not a flaw in the "last position = marker" rule: an
+    independent cross-check (83668 total `words` rows − 6236 markers =
+    77432, matching the Quran's widely-cited ~77,430 total word count)
+    and a manual re-read of 2:275's actual tail words (`... أَصْحَابُ
+    النَّارِ هُمْ فِيهَا خَالِدُونَ`, 5 real words) both confirm the
+    marker really is the last position; the lemma resource just
+    mistakenly indexed "نَار" against it instead of leaving it blank. Left
+    that resource's data untouched (rule #1's spirit — never invent/alter
+    upstream data, same treatment as As-Saadi's placeholder rows from the
+    Tafsir module) and derived `word_type` purely from `words`' own
+    structure instead of trusting the morphology resources' position
+    coverage, so this rare anomaly can't mis-tag a real word.
+    `MorphologyTabContent` now filters `words.where((w) =>
+    !w.isAyahEndMarker)` before building cards — one line, now backed by
+    real schema knowledge instead of a guess. Added a second, targeted
+    widget test (`test/morphology_tab_scroll_test.dart`) constructing a
+    `Word` with `wordType: 'end_marker'` directly and asserting it gets no
+    `MorphologyWordCard`; confirmed it's a real regression guard, not a
+    tautology, by temporarily reverting the filter and watching the test
+    fail (`findsNWidgets(3)` → "too many"), then restoring the fix and
+    re-confirming green. `assets/database/quran.db` regenerated (word_type
+    populated: 77432 'word' / 6236 'end_marker', matching the count
+    above). `flutter analyze`/`flutter test`: clean throughout (3/3
+    tests). Verified on the Android emulator with a fresh install (the
+    on-device DB is only copied from the bundled asset on first run, so a
+    plain reinstall over old app data wouldn't have picked up the
+    regenerated `quran.db` — uninstalled first): Al-Fatiha 1:4's "الصرف"
+    tab shows exactly 3 cards (مالك/يوم/الدين), no 4th marker card, and
+    1:1's first 3 visible cards (الرحمن/الله/بسم) show no marker between
+    or around them either — this session's emulator couldn't confirm the
+    4th/5th positions past this point since `adb input swipe` doesn't
+    reliably drive the horizontal drag gesture here (a pre-existing,
+    already-documented environment limitation, not a code issue — see the
+    Prompt 12 build-history entry above), which is exactly why the direct
+    widget test above carries the real proof for this fix, not the
+    on-device screenshots.
 - [ ] Phase 3 — Bookmarks/notes/last-read, performance, validation suite
 
 ## Version control

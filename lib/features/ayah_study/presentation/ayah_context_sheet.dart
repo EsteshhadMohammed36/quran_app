@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 
 import '../../../shared/theme/mushaf_theme.dart';
 import '../../../shared/widgets/quran_ayah_text.dart';
+import '../../morphology/domain/morphology_repository.dart';
+import '../../morphology/presentation/morphology_tab_content.dart';
 import '../../quran_reader/domain/quran_repository.dart';
 import '../../quran_reader/domain/surah.dart';
 import '../../quran_reader/domain/word.dart';
@@ -10,6 +12,7 @@ import '../../quran_reader/presentation/quran_reader_provider.dart';
 import '../../tafsir/domain/tafsir_entry.dart';
 import '../../tafsir/domain/tafsir_repository.dart';
 import '../../tafsir/domain/tafsir_source.dart';
+import '../../tafsir/presentation/grammar_tab_content.dart';
 import '../../tafsir/presentation/tafsir_html_text.dart';
 import '../../tafsir/presentation/tafsir_screen.dart';
 
@@ -23,19 +26,22 @@ import '../../tafsir/presentation/tafsir_screen.dart';
 /// in place, sheet remains open."
 ///
 /// This prompt only builds the sheet's shell (header, ayah text, study
-/// tabs, actions, audio row) wired to real surah/ayah/word data. The tab
-/// bodies and action buttons show a non-blocking "not available yet"
-/// state (spec §20) — Tafsir/Morphology/Audio/Bookmarks are later prompts
-/// that will fill these in, not this one.
+/// tabs, actions, audio row) wired to real surah/ayah/word data. Tafsir
+/// (Prompt 11), Grammar (Prompt 12, i'rab) and Morphology (Prompt 12,
+/// root/lemma/stem) now have real content; Meaning/Audio/Bookmarks/Notes
+/// are still later prompts and stay a non-blocking "not available yet"
+/// state (spec §20).
 class AyahContextSheet extends StatelessWidget {
   const AyahContextSheet({
     super.key,
     required this.repository,
     required this.tafsirRepository,
+    required this.morphologyRepository,
   });
 
   final QuranRepository repository;
   final TafsirRepository tafsirRepository;
+  final MorphologyRepository morphologyRepository;
 
   @override
   Widget build(BuildContext context) {
@@ -51,6 +57,7 @@ class AyahContextSheet extends StatelessWidget {
       ayahKey: ayahKey,
       repository: repository,
       tafsirRepository: tafsirRepository,
+      morphologyRepository: morphologyRepository,
     );
   }
 }
@@ -75,11 +82,13 @@ class _AyahSheetContent extends StatefulWidget {
     required this.ayahKey,
     required this.repository,
     required this.tafsirRepository,
+    required this.morphologyRepository,
   });
 
   final String ayahKey;
   final QuranRepository repository;
   final TafsirRepository tafsirRepository;
+  final MorphologyRepository morphologyRepository;
 
   @override
   State<_AyahSheetContent> createState() => _AyahSheetContentState();
@@ -130,6 +139,7 @@ class _AyahSheetContentState extends State<_AyahSheetContent> {
             ayahKey: widget.ayahKey,
             repository: widget.repository,
             tafsirRepository: widget.tafsirRepository,
+            morphologyRepository: widget.morphologyRepository,
           );
         },
       ),
@@ -184,50 +194,98 @@ class _AyahSheetBody extends StatelessWidget {
     required this.ayahKey,
     required this.repository,
     required this.tafsirRepository,
+    required this.morphologyRepository,
   });
 
   final _AyahData data;
   final String ayahKey;
   final QuranRepository repository;
   final TafsirRepository tafsirRepository;
+  final MorphologyRepository morphologyRepository;
 
   @override
   Widget build(BuildContext context) {
     final activeTab = context.watch<QuranReaderProvider>().activeStudyTab;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _Header(surah: data.surah, ayahNumber: data.ayahNumber),
-        const SizedBox(height: 12),
-        QuranAyahText(
-          words: data.words,
-          pageByWordIndex: data.pageNumberByWordIndex,
-        ),
-        const SizedBox(height: 12),
-        const Divider(height: 1),
-        _StudyTabsRow(activeTab: activeTab),
-        switch (activeTab) {
-          // Grammar (spec §13 i'rab) reads the already-ingested Iraab
-          // Al-Muyassar tafsir source directly (see [iraabMuyassarSourceId]'s
-          // doc comment) rather than a placeholder — Meaning/Morphology stay
-          // placeholders (Meaning is a later prompt; Morphology's root/lemma/
-          // stem ingestion is still blocked on two corrupted raw_resources
-          // downloads, 2026-09-12).
-          StudyTab.grammar => _GrammarTabContent(
-              ayahKey: ayahKey,
-              tafsirRepository: tafsirRepository,
+    // Cap the whole sheet's height (spec §10's "compact contextual panel",
+    // not a full-screen surface) and let only the ayah text + tab content
+    // region scroll internally, instead of the outer Column overflowing
+    // past the top of the screen. Header/tabs row/actions/audio stay
+    // pinned and always visible; only the variable-length middle — a long
+    // ayah's own text, or a long الإعراب/tafsir passage — can exceed the
+    // available space, e.g. a long Iraab Al-Muyassar entry on the
+    // الإعراب tab (StudyTab.grammar/GrammarTabContent), which previously
+    // caused a "RenderFlex overflowed" error since a plain Column only
+    // sizes to its children's total height regardless of what actually
+    // fits on screen.
+    final maxSheetHeight = MediaQuery.of(context).size.height * 0.8;
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxSheetHeight),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _Header(surah: data.surah, ayahNumber: data.ayahNumber),
+          const SizedBox(height: 12),
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  QuranAyahText(
+                    words: data.words,
+                    pageByWordIndex: data.pageNumberByWordIndex,
+                  ),
+                  const SizedBox(height: 12),
+                  const Divider(height: 1),
+                  _StudyTabsRow(activeTab: activeTab),
+                  switch (activeTab) {
+                    // Tafsir (Ibn Kathir + As-Saadi, excluding Iraab
+                    // Al-Muyassar — see [_TafsirTabContent]'s doc comment)
+                    // replaces the never-built Meaning tab, 2026-09-13.
+                    StudyTab.tafsir => _TafsirTabContent(
+                        ayahKey: ayahKey,
+                        tafsirRepository: tafsirRepository,
+                      ),
+                    // Grammar (spec §13 i'rab) reads the already-ingested
+                    // Iraab Al-Muyassar tafsir source directly (see
+                    // [iraabMuyassarSourceId]'s doc comment) rather than a
+                    // placeholder. Extracted to its own file
+                    // (tafsir/presentation/grammar_tab_content.dart) for
+                    // the same reason QuranAyahText was: one shared
+                    // implementation, not a copy that can silently drift.
+                    StudyTab.grammar => GrammarTabContent(
+                        ayahKey: ayahKey,
+                        tafsirRepository: tafsirRepository,
+                      ),
+                    // Morphology (spec §12: root/lemma/stem per word) —
+                    // Prompt 12's ingestion (tool/ingest_quran_data.dart)
+                    // now populates this for real. Extracted to its own
+                    // file (morphology/presentation/morphology_tab_content
+                    // .dart) — same reasoning as GrammarTabContent above.
+                    StudyTab.morphology => MorphologyTabContent(
+                        ayahKey: ayahKey,
+                        words: data.words,
+                        pageByWordIndex: data.pageNumberByWordIndex,
+                        morphologyRepository: morphologyRepository,
+                      ),
+                    // Every StudyTab value now has real content — no
+                    // placeholder case left (see the now-removed
+                    // _StudyTabPlaceholder).
+                  },
+                ],
+              ),
             ),
-          _ => _StudyTabPlaceholder(tab: activeTab),
-        },
-        const Divider(height: 1),
-        _ActionsRow(
-          ayahKey: ayahKey,
-          repository: repository,
-          tafsirRepository: tafsirRepository,
-        ),
-        const SizedBox(height: 4),
-        const _AudioRow(),
-      ],
+          ),
+          const Divider(height: 1),
+          _ActionsRow(
+            ayahKey: ayahKey,
+            repository: repository,
+            tafsirRepository: tafsirRepository,
+          ),
+          const SizedBox(height: 4),
+          const _AudioRow(),
+        ],
+      ),
     );
   }
 }
@@ -288,15 +346,14 @@ class _StudyTabsRow extends StatelessWidget {
           onPressed: tab == null
               ? null
               : () => context.read<QuranReaderProvider>().setActiveStudyTab(
-                  tab,
-                ),
+                    tab,
+                  ),
           style: TextButton.styleFrom(
             foregroundColor: mushafInkColor.withValues(
               alpha: tab == null ? 0.3 : (isActive ? 1.0 : 0.55),
             ),
-            backgroundColor: isActive
-                ? mushafAyahHighlightColor
-                : Colors.transparent,
+            backgroundColor:
+                isActive ? mushafAyahHighlightColor : Colors.transparent,
             shape: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(8)),
             ),
@@ -315,7 +372,14 @@ class _StudyTabsRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          tabButton('المعنى', StudyTab.meaning),
+          // Order/labels last changed 2026-09-13, replacing the never-
+          // built "المعنى" (Meaning) tab with "التفسير" (Tafsir) and
+          // moving it next to "الإعراب" (Grammar) — the user's explicit
+          // ask: "عاوزة التاب بتاعة المعني تستبدل بتاب التفسير ... يكون
+          // كلمة الاعراب والتفسير جنب بعض" (see StudyTab's own doc comment
+          // for the full rationale/spec-deviation note).
+          tabButton('التفسير', StudyTab.tafsir),
+          tabButton('الإعراب', StudyTab.grammar),
           // Renamed 2026-09-12 (was "الإعراب"/"النحو", swapped from spec
           // §12/§13's actual meaning): StudyTab.morphology is root/lemma/
           // stem/POS (spec §12) — "الصرف" in Arabic, not "الإعراب". "الإعراب"
@@ -323,7 +387,6 @@ class _StudyTabsRow extends StatelessWidget {
           // matching the already-ingested Iraab Al-Muyassar source, so it
           // belongs on StudyTab.grammar instead.
           tabButton('الصرف', StudyTab.morphology),
-          tabButton('الإعراب', StudyTab.grammar),
           // Qiraat is explicitly "(future)" in spec §10 — shown, not built.
           tabButton('القراءات', null),
         ],
@@ -332,42 +395,18 @@ class _StudyTabsRow extends StatelessWidget {
   }
 }
 
-class _StudyTabPlaceholder extends StatelessWidget {
-  const _StudyTabPlaceholder({required this.tab});
-
-  final StudyTab tab;
-
-  @override
-  Widget build(BuildContext context) {
-    // Non-blocking "not available yet" state (spec §20) — real content
-    // arrives in later prompts. Grammar (§13/i'rab) is no longer a
-    // placeholder — see [_GrammarTabContent] — so it's not listed here.
-    final String message = switch (tab) {
-      StudyTab.meaning => 'معنى الآية غير متاح بعد.',
-      StudyTab.morphology => 'تحليل الصرف غير متاح بعد.',
-      StudyTab.grammar =>
-        throw StateError('Grammar tab has real content — see _GrammarTabContent.'),
-    };
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 20),
-      child: Center(
-        child: Text(
-          message,
-          style: TextStyle(color: mushafInkColor.withValues(alpha: 0.55)),
-        ),
-      ),
-    );
-  }
-}
-
-/// The "الإعراب" (Grammar/I'rab, spec §13) study tab's real content:
-/// Iraab Al-Muyassar's entry for the selected ayah, read straight from the
-/// tafsir module's own repository/table (see [iraabMuyassarSourceId]) — spec
-/// §13 requires this to stay a distinct data source from both Tafsir's own
-/// screen and from Morphology, and to name that source explicitly, which
-/// this widget does via its header line.
-class _GrammarTabContent extends StatelessWidget {
-  const _GrammarTabContent({
+/// The "التفسير" study tab's real content (added 2026-09-13, replacing the
+/// never-built "المعنى" tab — see [StudyTab]'s doc comment): every
+/// [TafsirRepository] source *except* Iraab Al-Muyassar, as a single-open
+/// accordion (same convention as [TafsirScreen]'s own source list) —
+/// Iraab Al-Muyassar is deliberately excluded here since it's shown
+/// exclusively on the "الإعراب" tab instead ([GrammarTabContent]), per the
+/// user's explicit ask ("من غير الحاجة التالتة اللي هي الاعراب الميسر").
+/// Reuses the same already-ingested `TafsirRepository` the full-screen
+/// [TafsirScreen]/"تفسير" action already use (CLAUDE.md rule #4 — one
+/// canonical source, not a second copy of the data or the query logic).
+class _TafsirTabContent extends StatefulWidget {
+  const _TafsirTabContent({
     required this.ayahKey,
     required this.tafsirRepository,
   });
@@ -376,55 +415,215 @@ class _GrammarTabContent extends StatelessWidget {
   final TafsirRepository tafsirRepository;
 
   @override
+  State<_TafsirTabContent> createState() => _TafsirTabContentState();
+}
+
+class _TafsirTabContentState extends State<_TafsirTabContent> {
+  late final Future<List<TafsirSource>> _sourcesFuture =
+      widget.tafsirRepository.getSources();
+
+  // Single-open accordion. Before the user taps anything, the first
+  // visible source is shown open by default (so there's something to
+  // read without an extra tap) without that default being recorded as a
+  // real "selection" — _expandedSourceId only starts meaning anything
+  // once _userToggled flips true, at which point null legitimately means
+  // "everything collapsed".
+  bool _userToggled = false;
+  String? _expandedSourceId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: FutureBuilder<List<TafsirSource>>(
+        future: _sourcesFuture,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Center(child: Text('خطأ: ${snapshot.error}')),
+            );
+          }
+          final sources = snapshot.data;
+          if (sources == null) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final visibleSources = [
+            for (final source in sources)
+              if (source.sourceId != iraabMuyassarSourceId) source,
+          ];
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final source in visibleSources) ...[
+                  _TafsirSourceSection(
+                    key: ValueKey('${source.sourceId}:${widget.ayahKey}'),
+                    source: source,
+                    ayahKey: widget.ayahKey,
+                    tafsirRepository: widget.tafsirRepository,
+                    expanded: _userToggled
+                        ? _expandedSourceId == source.sourceId
+                        : source == visibleSources.first,
+                    onToggle: () => setState(() {
+                      final String? currentlyExpanded = _userToggled
+                          ? _expandedSourceId
+                          : visibleSources.first.sourceId;
+                      _userToggled = true;
+                      _expandedSourceId = currentlyExpanded == source.sourceId
+                          ? null
+                          : source.sourceId;
+                    }),
+                  ),
+                  if (source != visibleSources.last)
+                    Divider(
+                      height: 16,
+                      color: mushafInkColor.withValues(alpha: 0.15),
+                    ),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// One accordion section within [_TafsirTabContent]: a tappable source
+/// name header and, when [expanded], that source's content for the
+/// current ayah. Deliberately no search box here (unlike [TafsirScreen]'s
+/// own accordion) — this is the compact sheet, not the full-screen reader;
+/// searching within a source still works via the "تفسير" action's full
+/// [TafsirScreen].
+class _TafsirSourceSection extends StatelessWidget {
+  const _TafsirSourceSection({
+    super.key,
+    required this.source,
+    required this.ayahKey,
+    required this.tafsirRepository,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  final TafsirSource source;
+  final String ayahKey;
+  final TafsirRepository tafsirRepository;
+  final bool expanded;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: onToggle,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                Icon(
+                  expanded ? Icons.expand_less : Icons.expand_more,
+                  size: 20,
+                  color: mushafInkColor.withValues(alpha: 0.6),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    source.name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: mushafInkColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (expanded)
+          Padding(
+            padding: const EdgeInsets.only(right: 24, bottom: 4),
+            child: _TafsirSourceContent(
+              sourceId: source.sourceId,
+              ayahKey: ayahKey,
+              tafsirRepository: tafsirRepository,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// One source's resolved tafsir text for [ayahKey] — same shape as
+/// [TafsirScreen]'s own `_SourceContent`, kept as a separate small copy
+/// here (rather than shared) since this one is styled for the compact
+/// sheet (smaller, fixed font size, no font-size control) while
+/// [TafsirScreen]'s is styled for a full-screen reader with a user-
+/// adjustable size.
+class _TafsirSourceContent extends StatelessWidget {
+  const _TafsirSourceContent({
+    required this.sourceId,
+    required this.ayahKey,
+    required this.tafsirRepository,
+  });
+
+  final String sourceId;
+  final String ayahKey;
+  final TafsirRepository tafsirRepository;
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<TafsirEntry>(
-      future: tafsirRepository.getEntry(iraabMuyassarSourceId, ayahKey),
+      future: tafsirRepository.getEntry(sourceId, ayahKey),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            child: Center(child: Text('خطأ: ${snapshot.error}')),
-          );
+          return Text('خطأ: ${snapshot.error}');
         }
         final entry = snapshot.data;
         if (entry == null) {
           return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 20),
+            padding: EdgeInsets.symmetric(vertical: 12),
             child: Center(child: CircularProgressIndicator()),
           );
         }
         final content = entry.content;
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                entry.isMultiAyahGroup
-                    ? 'الإعراب الميسر • الآيات ${entry.groupAyahStart} - '
-                        '${entry.groupAyahEnd}'
-                    : 'الإعراب الميسر',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: mushafInkColor.withValues(alpha: 0.7),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (entry.isMultiAyahGroup)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  'تفسير الآيات ${entry.groupAyahStart} - '
+                  '${entry.groupAyahEnd}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: mushafInkColor.withValues(alpha: 0.7),
+                  ),
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                content == null
-                    ? 'لا يوجد إعراب مستقل لهذه الآية في هذا المصدر.'
-                    : stripTafsirHtml(content),
-                style: TextStyle(
-                  fontSize: 15,
-                  height: 1.6,
-                  color: mushafInkColor,
-                  fontStyle:
-                      content == null ? FontStyle.italic : FontStyle.normal,
-                ),
+            Text(
+              content == null
+                  ? 'لا يوجد تفسير مستقل لهذه الآية في هذا المصدر.'
+                  : stripTafsirHtml(content),
+              style: TextStyle(
+                fontSize: 15,
+                height: 1.6,
+                color: mushafInkColor,
+                fontStyle:
+                    content == null ? FontStyle.italic : FontStyle.normal,
               ),
-            ],
-          ),
+            ),
+          ],
         );
       },
     );

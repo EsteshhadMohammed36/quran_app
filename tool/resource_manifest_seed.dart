@@ -278,3 +278,85 @@ const List<ResourceManifestEntry> tafsirModuleResourceManifestSeed = [
         '(qul.tarteel.ai).',
   ),
 ];
+
+/// Resource manifest entries for the Morphology module (Prompt 12, spec
+/// §12/§12.1/§12.2).
+///
+/// All 3 from QUL's Morphology directory
+/// (https://qul.tarteel.ai/resources/morphology), the "Word by word"
+/// variants (not the "Ayah by Ayah" ones QUL also lists) — matching spec
+/// §12.1's per-word key (`surah:ayah:word_position`) rather than a
+/// per-ayah grouping. Confirmed directly on that page there's no separate
+/// part-of-speech/grammar-tag resource to pair with these, so
+/// `morphology.part_of_speech`/`grammar_tags` stay NULL for this prompt
+/// (spec §12.2: "Grammar tags (when available)").
+///
+/// Two of the three initial downloads (word-lemma, word-stem) came back
+/// truncated twice in a row (a download-interruption issue, verified
+/// byte-for-byte against each zip's own local-file-header declared size —
+/// not a source-side defect); a third download attempt on 2026-09-13
+/// finally completed both in full (zip integrity check clean). Checksums
+/// below were computed against those complete files.
+///
+/// Each resource's own detail page was checked before download (spec §11's
+/// "confirm against the resource detail page and terms" standard, applied
+/// here too) — none exposes a license distinct from the site-wide Terms of
+/// Use, same as every other QUL resource already in this manifest.
+const List<ResourceManifestEntry> morphologyModuleResourceManifestSeed = [
+  ResourceManifestEntry(
+    resourceId: 'qul-morphology-word-root',
+    resourceName: 'Word root',
+    provider: 'QUL',
+    category: 'morphology',
+    sourceUrl: 'https://qul.tarteel.ai/resources/morphology/76',
+    downloadFormat: 'sqlite',
+    versionOrRevision: 'file dated 2025-07-09 (per zip entry timestamp)',
+    licenseOrTermsUrl: 'https://www.tarteel.ai/terms',
+    sha256:
+        'a85c325c669fdf3295f8c150f9fbe780391ec9fc3c29b2c8b37b93083038db69',
+    targetTableOrAssetPath: 'morphology',
+    compatibilityGroup: 'madinah-v2-qpc-v2-hafs',
+    status: ResourceManifestStatus.pending,
+    attributionText:
+        'Word root (Quranic morphology), via Quranic Universal Library '
+        '(qul.tarteel.ai).',
+  ),
+
+  ResourceManifestEntry(
+    resourceId: 'qul-morphology-word-lemma',
+    resourceName: 'Word lemma',
+    provider: 'QUL',
+    category: 'morphology',
+    sourceUrl: 'https://qul.tarteel.ai/resources/morphology/75',
+    downloadFormat: 'sqlite',
+    versionOrRevision: 'file dated 2025-07-09 (per zip entry timestamp)',
+    licenseOrTermsUrl: 'https://www.tarteel.ai/terms',
+    sha256:
+        '8fd431f0b765d9a66e8ad584edbfc19bb2c62091bb1809a97666e47648f4a356',
+    targetTableOrAssetPath: 'morphology',
+    compatibilityGroup: 'madinah-v2-qpc-v2-hafs',
+    status: ResourceManifestStatus.pending,
+    attributionText:
+        'Word lemma (Quranic morphology), via Quranic Universal Library '
+        '(qul.tarteel.ai).',
+  ),
+
+  ResourceManifestEntry(
+    resourceId: 'qul-morphology-word-stem',
+    resourceName: 'Word stem',
+    provider: 'QUL',
+    category: 'morphology',
+    sourceUrl: 'https://qul.tarteel.ai/resources/morphology/77',
+    downloadFormat: 'sqlite',
+    versionOrRevision: 'file dated 2025-07-09 (per zip entry timestamp)',
+    licenseOrTermsUrl: 'https://www.tarteel.ai/terms',
+    sha256:
+        '57992661ebd776d2400fb129562ab931a7ea2211a8cd5b757d72e59556924784',
+    targetTableOrAssetPath: 'morphology',
+    compatibilityGroup: 'madinah-v2-qpc-v2-hafs',
+    status: ResourceManifestStatus.pending,
+    attributionText:
+        'Word stem (Quranic morphology), via Quranic Universal Library '
+        '(qul.tarteel.ai).',
+  ),
+];
