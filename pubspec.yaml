@@ -50,6 +50,7 @@ dependencies:
   path_provider: ^2.1.2
   # Companion to sqflite for building the on-device database file path.
   path: ^1.9.0
+  just_audio: ^0.10.6
 
 # path_provider_android is a transitive dep (via path_provider) — pub's
 # solver isn't guaranteed to re-pick the same version across resolutions,

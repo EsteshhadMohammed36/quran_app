@@ -69,7 +69,7 @@ QUL/SQLite rows directly. State management: Provider (spec §17.1).
   - [x] Resource manifest bookkeeping (§16, §27) — `lib/core/resource_manifest/{resource_manifest_entry,resource_manifest_repository,sqlite_resource_manifest_repository}.dart`; `resource_manifest` table gained an `attribution_text` column (§27) not in the §16 list verbatim
   - [x] QUL resource download instructions — user downloaded 4 resources for the `madinah-v2-qpc-v2-hafs` group into `raw_resources/` (git-ignored): Mushaf layout (`qpc-v2-15-lines.db.zip`), Quran script (`qpc-v2.db.zip`), font (`QPC V2 Font.ttf.bz2`, actually a zip of 604 page fonts), surah names (`quran-metadata-surah-name.json.zip` — added mid-Prompt-6 once `surahs.name_arabic` turned out to have no source among the first 3; user chose the QUL fallback over quran-assets/metadata). Schemas verified by hand against spec §6/§8. Checksums + full metadata in `tool/resource_manifest_seed.dart`.
   - [x] Ingestion pipeline (§23/§23.1/§24) — `tool/ingest_quran_data.dart`: reads the 4 raw_resources files via the `sqlite3` CLI + `package:archive`, transforms to canonical schema, runs all §24 integrity checks, writes a fresh pre-populated `assets/database/quran.db` (114 surahs, 6236 ayahs, 83668 words, 9046 mushaf_lines, 4 resource_manifest rows — verified against live counts). `lib/core/database/app_database.dart` now copies this bundled asset to the documents dir on first run instead of on-device ingestion (user's explicit choice over in-app ingestion, 2026-08-30). `flutter analyze`/`dart analyze tool/`/`flutter test`: clean. Verified end-to-end on the Pixel 6 API 34 emulator (temporary debug print, reverted) — real device confirmed the asset-copy + query path works.
-- [ ] Phase 2 — Ayah selection, context sheet, tafsir, morphology, audio
+- [x] Phase 2 — Ayah selection, context sheet, tafsir, morphology, audio
   - [x] Full 604-page reader + ayah selection/hit testing (Prompt 9, spec
     §9/§17.1/§21) — `MushafReaderScreen` (new, now `main.dart`'s home,
     superseding `MushafPrototypeScreen`) swipes across every page the
@@ -508,6 +508,115 @@ QUL/SQLite rows directly. State management: Provider (spec §17.1).
     Prompt 12 build-history entry above), which is exactly why the direct
     widget test above carries the real proof for this fix, not the
     on-device screenshots.
+  - [x] Audio Module (Prompt 13, spec §14) — one QUL recitation resource
+    ingested (Mishari Rashid al-Afasy, Ayah-by-Ayah Murattal, Hafs, "With
+    segments"; no reciter preference given, so the most widely-used default
+    reciter in Quran apps was picked over as-Sudais/Abdul Basit/Al-Husary,
+    all equally tagged). This resource is metadata only — an `audio_url`
+    per ayah (streamed from `audio-cdn.tarteel.ai`) plus word-level timing
+    segments, not the mp3 bytes themselves — bundling full Quran audio
+    (many hundreds of MB to low GB) the way the 604 QPC V2 fonts were
+    bundled isn't practical, so playback streams `audio_url` directly at
+    runtime (user's explicit choice, 2026-09-14). Added the `just_audio`
+    package (`flutter pub add just_audio`, landed on 0.10.6) as the one new
+    dependency this requires.
+    `tool/resource_manifest_seed.dart`: new `audioModuleResourceManifestSeed`
+    (1 entry, resource detail page + checksum verified same as every prior
+    resource). Documents two real data-shape findings caught by inspecting
+    the downloaded file directly rather than trusting its own docs: (1) the
+    source's own `ayah_number` column is actually a **global** 1-6236 index
+    across the whole Quran (e.g. Al-Baqarah's 286 ayahs are numbered
+    8-293), not the per-surah number its name suggests; (2) each segment is
+    `[array_index, word_position, start_ms, end_ms]`, and in 61 of 6236
+    ayahs (e.g. 2:61) the reciter audibly repeats a phrase mid-ayah, so the
+    same `word_position` legitimately appears twice with two different
+    timestamps.
+    `tool/ingest_quran_data.dart`: new `_buildAudio`/`_runAudioIntegrityChecks`
+    populate the already-existing `audio_assets`/`audio_segments` tables —
+    converts the global ayah_number to the app's per-surah numbering by
+    rank-within-surah, then cross-checks that conversion against an
+    *independent* signal (the `audio_url` filename itself encodes the real
+    surah/ayah, e.g. `.../002061.mp3` = 2:61) for all 6236 rows, failing
+    fast on any mismatch rather than trusting the rank-based math alone.
+    `audio_segments.segment_index` stores the segment's own array position,
+    not `word_position` (which the repeat-phrase finding above shows isn't
+    always unique per ayah); `word_key` is left `null` when a segment lands
+    on the ayah-end marker or a rare extra trailing segment (3 ayahs:
+    11:44, 20:94, 37:102) rather than pointing at a nonexistent word.
+    `duration_ms` is derived from each ayah's last segment `end_ms` since
+    the source's own duration column was empty for all 6236 rows.
+    `assets/database/quran.db` regenerated (6236 `audio_assets` rows, 77991
+    `audio_segments` rows, 12 `resource_manifest` rows total).
+    `lib/core/database/schema.dart`: doc comments on `audio_assets`/
+    `audio_segments` updated to record what's actually stored now that
+    these tables (created empty back in Phase 1) hold real data — in
+    particular that `file_path` holds a remote URL, not an on-device path.
+    `lib/features/audio/{domain,data,presentation}` (new feature, per
+    spec §17's architecture tree): `Reciter`/`AudioTrack`/`AudioSegment`
+    entities, `AudioRepository` interface matching spec §18's method set
+    exactly, `SqliteAudioRepository` (reciters read via a `DISTINCT` query
+    on `audio_assets` — no separate `reciters` table, rule #4), and
+    `AudioProvider` (spec §17.1) wrapping a single `just_audio` `AudioPlayer`
+    that streams `AudioTrack.filePath` directly; on every position update it
+    resolves the current segment and republishes its `word_key` as
+    `currentWordKey` (spec §14's AudioController: "-> resolve current
+    segment -> map to word/ayah -> update highlight state").
+    `lib/shared/widgets/quran_ayah_text.dart`: `QuranAyahText` gained an
+    optional `highlightedWordKey` param — the matching word gets a
+    highlighted background (presentation only, glyph text untouched, rule
+    #1 unaffected).
+    `lib/features/ayah_study/presentation/ayah_context_sheet.dart`: the
+    `_AudioRow` placeholder ("الصوت غير متاح بعد") is now a real play/pause
+    button + reciter name + progress bar, reading `AudioProvider` via
+    `context.watch` (ambient, same pattern as `QuranReaderProvider` — the
+    sheet isn't a separate route, so no explicit constructor-param passing
+    needed like `TafsirScreen` requires); `_AyahSheetBody` only feeds
+    `highlightedWordKey` into `QuranAyahText` when the *currently playing*
+    ayah matches the one being displayed, so a stale highlight from a
+    previous ayah can't leak onto a newly selected one.
+    `lib/features/quran_reader/presentation/mushaf_reader_screen.dart`:
+    creates one `AudioRepository`/`AudioProvider` alongside the existing
+    Tafsir/Morphology repositories, reads the single ingested reciter's id
+    from the data itself (`getReciters().first`) rather than hardcoding it
+    a second time in the app layer, and adds `AudioProvider` to the
+    existing `ChangeNotifierProvider` tree via `MultiProvider`.
+    `test/morphology_tab_scroll_test.dart`: needed a `_FakeAudioRepository`
+    + `AudioProvider` added to its `AyahContextSheet` test's provider tree
+    (it builds the sheet directly, same as production code now requires) —
+    without it the test failed with a cascading `RenderFlex overflowed`
+    once `_AudioRow` started reading `AudioProvider` via `context.watch`.
+    `android/gradle.properties`: added `kotlin.incremental=false`. Found
+    while building for on-device verification: `just_audio`'s
+    `audio_session` dependency's Kotlin compilation always failed on this
+    machine with `IllegalArgumentException: this and base files have
+    different roots` — a Windows-specific Kotlin-incremental-compiler bug
+    that surfaces when the project (`D:\...`) and the pub cache holding the
+    plugin's source (`C:\Users\...`) are on different drive letters; a
+    non-incremental build has no relocatable cache to trip over this, so
+    it isn't affected. Build-tooling workaround, not an app-code change.
+    Verification: `flutter analyze`/`flutter test`: both clean (3/3 tests).
+    The ingestion pipeline's own numbering conversion is independently
+    cross-checked on every run (see above), not just spot-checked once by
+    hand. On-device (Pixel 6 API 34 emulator, booted headless in this
+    session's sandboxed environment): fresh install correctly copies the
+    regenerated `quran.db` (pulled and queried directly off the device to
+    confirm — 6236 `audio_assets` rows present, exactly matching what
+    `SqliteAudioRepository.getReciters()` would read), and the Ayah Context
+    Sheet's audio row correctly shows the real reciter name and an enabled
+    play button (no longer the "غير متاح بعد" placeholder) across several
+    different ayahs (1:1, 2:7, 2:13). Actually tapping play to confirm live
+    playback + word-highlighting could **not** be verified this session:
+    this sandboxed emulator's outbound internet is blocked entirely
+    (`ping 8.8.8.8`: 100% loss, confirmed before attempting playback) *and*
+    `adb input tap` input-injection itself degraded partway through the
+    session (a previously-working tap on the sheet's own close button
+    stopped registering) — both pre-existing categories of environment
+    limitation already documented earlier in this file (see the Prompt 12
+    entries above re: `adb input swipe`), not new code issues. The
+    `Text.rich`/`TextSpan` highlighting mechanism itself was verified the
+    same way `QuranAyahText`'s original rendering was in earlier prompts —
+    by inspection and `flutter analyze`/`flutter test`, since no test in
+    this repo yet drives real audio playback end-to-end.
 - [ ] Phase 3 — Bookmarks/notes/last-read, performance, validation suite
 
 ## Version control

@@ -163,6 +163,14 @@ CREATE TABLE morphology (
 /// `audio_assets` — Reciter/file metadata. Key: `audio_id`.
 /// Either `ayah_key` (ayah-level file) or `surah_id` (surah-level file)
 /// is populated depending on the recitation resource's granularity (§14).
+/// `file_path` holds a remote `https://` URL, not an on-device path — the
+/// ingested recitation resource (Prompt 13) is itself only metadata (a URL
+/// + timing per ayah), and bundling actual recitation audio in the app the
+/// way the 604 QPC V2 fonts were bundled isn't practical (many hundreds of
+/// MB to low GB); playback streams this URL at runtime instead. `duration
+/// _ms` is derived from the last segment's own `end_ms` at ingestion time
+/// (the source's own duration field is empty) — an approximation only,
+/// good enough for display before the real audio loads.
 const String createAudioAssetsTable = '''
 CREATE TABLE audio_assets (
   audio_id TEXT PRIMARY KEY,
@@ -179,6 +187,16 @@ CREATE TABLE audio_assets (
 
 /// `audio_segments` — Timing metadata. Key: `(audio_id, segment_index)`.
 /// Used for synchronized word/ayah highlighting (§14).
+/// `segment_index` is the segment's own 0-based position within the
+/// recitation's timing array for that ayah — not `word_key`'s word
+/// position, because a reciter can audibly repeat a phrase mid-ayah (found
+/// in ~1% of ayahs in the ingested resource, e.g. 2:68), which puts the
+/// same word position at two different points in the array with two
+/// different timestamps. `word_key` is `null` when a segment doesn't
+/// resolve to a real word (e.g. it lands on the ayah-end marker, or on a
+/// rare extra trailing segment some sources include) rather than the
+/// segment being an ingestion gap — see
+/// tool/resource_manifest_seed.dart's `audioModuleResourceManifestSeed`.
 const String createAudioSegmentsTable = '''
 CREATE TABLE audio_segments (
   audio_id TEXT NOT NULL,

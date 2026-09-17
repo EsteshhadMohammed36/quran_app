@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../shared/theme/mushaf_theme.dart';
 import '../../../shared/widgets/quran_ayah_text.dart';
+import '../../audio/presentation/audio_provider.dart';
 import '../../morphology/domain/morphology_repository.dart';
 import '../../morphology/presentation/morphology_tab_content.dart';
 import '../../quran_reader/domain/quran_repository.dart';
@@ -206,6 +207,13 @@ class _AyahSheetBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final activeTab = context.watch<QuranReaderProvider>().activeStudyTab;
+    final audioProvider = context.watch<AudioProvider>();
+    // Only highlight while *this* ayah is the one actually playing — a
+    // stale currentWordKey from a previously-played ayah must never leak
+    // onto a newly selected one just because the sheet re-rendered.
+    final String? highlightedWordKey = audioProvider.currentAyahKey == ayahKey
+        ? audioProvider.currentWordKey
+        : null;
     // Cap the whole sheet's height (spec §10's "compact contextual panel",
     // not a full-screen surface) and let only the ayah text + tab content
     // region scroll internally, instead of the outer Column overflowing
@@ -234,6 +242,7 @@ class _AyahSheetBody extends StatelessWidget {
                   QuranAyahText(
                     words: data.words,
                     pageByWordIndex: data.pageNumberByWordIndex,
+                    highlightedWordKey: highlightedWordKey,
                   ),
                   const SizedBox(height: 12),
                   const Divider(height: 1),
@@ -283,7 +292,7 @@ class _AyahSheetBody extends StatelessWidget {
             tafsirRepository: tafsirRepository,
           ),
           const SizedBox(height: 4),
-          const _AudioRow(),
+          _AudioRow(ayahKey: ayahKey),
         ],
       ),
     );
@@ -707,28 +716,94 @@ class _ActionsRow extends StatelessWidget {
   }
 }
 
+/// Play/pause + reciter name + a simple progress bar (spec §14/§10's
+/// "Audio: Play/Pause, Reciter, Optional synchronized highlight" — the
+/// highlight itself lives on [QuranAyahText], driven from
+/// [_AyahSheetBody]'s own `highlightedWordKey`, not here).
 class _AudioRow extends StatelessWidget {
-  const _AudioRow();
+  const _AudioRow({required this.ayahKey});
+
+  final String ayahKey;
+
+  String _formatDuration(Duration d) {
+    final minutes = d.inMinutes.remainder(60);
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
 
   @override
   Widget build(BuildContext context) {
+    final audioProvider = context.watch<AudioProvider>();
+    final bool isCurrentAyah = audioProvider.currentAyahKey == ayahKey;
+    final bool isLoading = isCurrentAyah && audioProvider.isLoading;
+    final bool isPlaying = isCurrentAyah && audioProvider.isPlaying;
+    final Object? error = isCurrentAyah ? audioProvider.error : null;
+    final Duration position = isCurrentAyah
+        ? audioProvider.position
+        : Duration.zero;
+    final Duration duration = isCurrentAyah
+        ? audioProvider.duration
+        : Duration.zero;
+    final String? reciterName = isCurrentAyah
+        ? audioProvider.track?.reciterName
+        : null;
+
     return Row(
       children: [
         IconButton(
-          onPressed: null,
-          icon: Icon(
-            Icons.play_arrow_rounded,
-            color: mushafInkColor.withValues(alpha: 0.4),
-          ),
+          onPressed: audioProvider.reciterId == null
+              ? null
+              : () => audioProvider.togglePlayPauseOrLoad(ayahKey),
+          icon: isLoading
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Icon(
+                  isPlaying
+                      ? Icons.pause_rounded
+                      : Icons.play_arrow_rounded,
+                  color: mushafInkColor,
+                ),
         ),
         Expanded(
-          child: Text(
-            'الصوت غير متاح بعد',
-            style: TextStyle(
-              fontSize: 12,
-              color: mushafInkColor.withValues(alpha: 0.4),
-            ),
-          ),
+          child: error != null
+              ? const Text(
+                  'تعذّر تشغيل الصوت',
+                  style: TextStyle(fontSize: 12, color: Colors.redAccent),
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      reciterName ?? 'مشاري راشد العفاسي',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: mushafInkColor.withValues(alpha: 0.7),
+                      ),
+                    ),
+                    if (isCurrentAyah && duration > Duration.zero) ...[
+                      const SizedBox(height: 4),
+                      LinearProgressIndicator(
+                        value:
+                            (position.inMilliseconds / duration.inMilliseconds)
+                                .clamp(0.0, 1.0),
+                        minHeight: 3,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${_formatDuration(position)} / '
+                        '${_formatDuration(duration)}',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: mushafInkColor.withValues(alpha: 0.5),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
         ),
       ],
     );

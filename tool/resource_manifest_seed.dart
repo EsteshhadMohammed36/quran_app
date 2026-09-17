@@ -360,3 +360,82 @@ const List<ResourceManifestEntry> morphologyModuleResourceManifestSeed = [
         '(qul.tarteel.ai).',
   ),
 ];
+
+/// The single Audio module (Prompt 13, spec §14) resource: Mishari Rashid
+/// al-Afasy's Ayah-by-Ayah Murattal recitation with word-level segment
+/// timing ("With segments" tag), Hafs — matches this project's
+/// `madinah-v2-qpc-v2-hafs` compatibility group. Reciter chosen by the user
+/// (no preference given; the most widely-used default reciter in Quran
+/// apps was picked) from QUL's recitation resources list, which offers 80+
+/// reciters; several others (as-Sudais, Abdul Basit, Al-Husary) also carry
+/// the same 3 tags and would have worked equally well (2026-09-14).
+///
+/// This resource is metadata only — an `audio_url` per ayah (pointing at
+/// `audio-cdn.tarteel.ai`) plus a segment-timing array — not the actual
+/// mp3 bytes. Bundling full Quran recitation audio (many hundreds of MB to
+/// low GBs) the way the 604 QPC V2 fonts were bundled isn't practical, so
+/// playback streams `audio_url` directly at runtime instead (user's
+/// explicit choice, 2026-09-14, alongside adding the `just_audio` package
+/// dependency this requires — see pubspec.yaml).
+///
+/// Downloaded from the resource's own detail page
+/// (https://qul.tarteel.ai/resources/recitation/118, "Download sqlite"),
+/// same site-wide Terms of Use as every other QUL resource above. QUL's
+/// own download names the file after its *internal* recitation id (953),
+/// not the page id in the URL (118) — both are the same resource, verified
+/// directly against the detail page's own documented JSON format
+/// (`{surah, ayah, audio_url, segments}`) before ingesting.
+///
+/// Two real data-shape findings from inspecting the downloaded file
+/// directly (not assumed from the resource's own docs), both handled in
+/// `tool/ingest_quran_data.dart`'s `_buildAudio`/`_runAudioIntegrityChecks`
+/// rather than papered over:
+/// 1. The `verses` table's own `ayah_number` column is actually a
+///    **global** 1-6236 index across the whole Quran (e.g. Al-Baqarah's
+///    286 ayahs are numbered 8-293), not the per-surah number its name
+///    suggests — verified against every surah's ayah count from the
+///    already-ingested `surahs` table before trusting this reading, not
+///    just from one example. Converted to the app's own per-surah
+///    `ayah_number` at ingestion time.
+/// 2. Each segment is `[array_index, word_position, start_ms, end_ms]`,
+///    not the 3-element tuple the site's own docs show — verified
+///    `array_index + 1 == word_position` holds for every individual
+///    segment tuple, so the first element is redundant *within one tuple*.
+///    It is NOT redundant across a whole ayah's segment list, though: in
+///    61 of 6236 ayahs (e.g. 2:68) the reciter audibly repeats a phrase
+///    mid-ayah, so the same `word_position` appears twice with two
+///    different timestamps — `audio_segments.segment_index` therefore
+///    stores the segment's own array position (always unique, preserves
+///    playback order), not `word_position` (would collide on the second
+///    occurrence). Most ayahs' segments stop at the last *real* word
+///    (excluding the ayah-end marker, see `words.word_type`), 361 include
+///    one extra segment for the marker itself (the recitation's own
+///    verse-end pause), and 3 ayahs (11:44, 20:94, 37:102) have one
+///    segment beyond even that — a genuine upstream alignment quirk, kept
+///    verbatim rather than altered (CLAUDE.md rule #1's spirit). (Counts
+///    per `tool/ingest_quran_data.dart`'s own run output, the authoritative
+///    source — a slightly different manual spot-check count was seen
+///    during investigation before the final per-ayah dedup logic landed.)
+const List<ResourceManifestEntry> audioModuleResourceManifestSeed = [
+  ResourceManifestEntry(
+    resourceId: 'qul-recitation-mishari-alafasy-hafs',
+    resourceName:
+        'Mishari Rashid al-Afasy — Ayah-by-Ayah recitation + segments',
+    provider: 'QUL',
+    category: 'audio',
+    sourceUrl: 'https://qul.tarteel.ai/resources/recitation/118',
+    downloadFormat: 'sqlite',
+    versionOrRevision: 'file dated 2025-05-27 (per zip entry timestamp)',
+    licenseOrTermsUrl: 'https://www.tarteel.ai/terms',
+    sha256:
+        '1ce2eedfed2943d616fa64f31551332134e5a791ca06ee10c7ba72c81234ac9e',
+    targetTableOrAssetPath: 'audio_assets, audio_segments',
+    compatibilityGroup: 'madinah-v2-qpc-v2-hafs',
+    status: ResourceManifestStatus.pending,
+    attributionText:
+        'Recitation by Mishari Rashid al-Afasy and word-level timing '
+        'segments, via Quranic Universal Library (qul.tarteel.ai). Audio '
+        'files themselves are streamed at playback time from '
+        'audio-cdn.tarteel.ai, not bundled with the app.',
+  ),
+];

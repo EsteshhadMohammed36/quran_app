@@ -27,6 +27,7 @@ class QuranAyahText extends StatelessWidget {
     required this.pageByWordIndex,
     this.fontSize = 26,
     this.height = 1.8,
+    this.highlightedWordKey,
   });
 
   final List<Word> words;
@@ -34,12 +35,21 @@ class QuranAyahText extends StatelessWidget {
   final double fontSize;
   final double height;
 
+  /// When set, the word whose [Word.wordKey] matches gets a highlighted
+  /// background — driven by [AudioProvider.currentWordKey] during
+  /// recitation playback (spec §10/§14's "Optional synchronized
+  /// highlight"). Purely a presentation-layer background color; the
+  /// glyph text itself is never touched (rule #1).
+  final String? highlightedWordKey;
+
   @override
   Widget build(BuildContext context) {
     final spans = <InlineSpan>[];
     for (var i = 0; i < words.length; i++) {
       final word = words[i];
       final pageNumber = pageByWordIndex[word.wordIndex];
+      final bool isHighlighted =
+          highlightedWordKey != null && word.wordKey == highlightedWordKey;
       spans.add(
         TextSpan(
           text: word.text,
@@ -50,6 +60,9 @@ class QuranAyahText extends StatelessWidget {
             fontSize: fontSize,
             height: height,
             color: mushafInkColor,
+            backgroundColor: isHighlighted
+                ? mushafInkColor.withValues(alpha: 0.15)
+                : null,
           ),
         ),
       );

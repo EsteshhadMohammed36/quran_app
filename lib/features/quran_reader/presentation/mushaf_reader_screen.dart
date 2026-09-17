@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../audio/data/sqlite_audio_repository.dart';
+import '../../audio/domain/audio_repository.dart';
+import '../../audio/presentation/audio_provider.dart';
 import '../../ayah_study/presentation/ayah_context_sheet.dart';
 import '../../morphology/data/sqlite_morphology_repository.dart';
 import '../../morphology/domain/morphology_repository.dart';
@@ -41,6 +44,10 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
   final TafsirRepository _tafsirRepository = SqliteTafsirRepository();
   final MorphologyRepository _morphologyRepository =
       SqliteMorphologyRepository();
+  final AudioRepository _audioRepository = SqliteAudioRepository();
+  late final AudioProvider _audioProvider = AudioProvider(
+    audioRepository: _audioRepository,
+  );
   QuranReaderProvider? _provider;
   PageController? _pageController;
   Object? _initError;
@@ -54,6 +61,10 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
   Future<void> _init() async {
     try {
       final totalPages = await _repository.getPageCount();
+      // Only one reciter is ingested so far (Prompt 13, spec §14 has no
+      // picker yet) — read it from the data itself instead of
+      // hardcoding its id a second time in the app layer.
+      final reciters = await _audioRepository.getReciters();
       if (!mounted) return;
       setState(() {
         _provider = QuranReaderProvider(
@@ -64,6 +75,9 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
         _pageController = PageController(
           initialPage: widget.initialPage - 1,
         );
+        if (reciters.isNotEmpty) {
+          _audioProvider.reciterId = reciters.first.reciterId;
+        }
       });
     } catch (e) {
       if (!mounted) return;
@@ -75,6 +89,7 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
   void dispose() {
     _provider?.dispose();
     _pageController?.dispose();
+    _audioProvider.dispose();
     super.dispose();
   }
 
@@ -98,8 +113,11 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    return ChangeNotifierProvider<QuranReaderProvider>.value(
-      value: provider,
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider<QuranReaderProvider>.value(value: provider),
+        ChangeNotifierProvider<AudioProvider>.value(value: _audioProvider),
+      ],
       child: Consumer<QuranReaderProvider>(
         builder: (context, readerProvider, _) => Scaffold(
           body: SafeArea(

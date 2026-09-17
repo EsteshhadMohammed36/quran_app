@@ -2,6 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
+import 'package:quran_app/features/audio/domain/audio_repository.dart';
+import 'package:quran_app/features/audio/domain/audio_segment.dart';
+import 'package:quran_app/features/audio/domain/audio_track.dart';
+import 'package:quran_app/features/audio/domain/reciter.dart';
+import 'package:quran_app/features/audio/presentation/audio_provider.dart';
 import 'package:quran_app/features/ayah_study/presentation/ayah_context_sheet.dart';
 import 'package:quran_app/features/morphology/domain/morphology_entry.dart';
 import 'package:quran_app/features/morphology/domain/morphology_repository.dart';
@@ -68,6 +73,24 @@ class _FakeMorphologyRepository implements MorphologyRepository {
   @override
   Future<List<MorphologyEntry>> getEntriesForAyah(String ayahKey) async =>
       entries;
+}
+
+/// Never actually queried by this test (no ayah is ever played), but
+/// [AyahContextSheet] needs an [AudioProvider] in its ambient tree — see
+/// `mushaf_reader_screen.dart`'s own wiring, which this test mirrors.
+class _FakeAudioRepository implements AudioRepository {
+  @override
+  Future<List<Reciter>> getReciters() async => [];
+
+  @override
+  Future<AudioTrack?> getAyahAudio(String reciterId, String ayahKey) async =>
+      null;
+
+  @override
+  Future<List<AudioSegment>> getSegments(
+    String reciterId,
+    String ayahKey,
+  ) async => [];
 }
 
 class _FakeTafsirRepository implements TafsirRepository {
@@ -139,10 +162,22 @@ void main() {
       );
       provider.setActiveStudyTab(StudyTab.morphology);
 
+      final audioProvider = AudioProvider(
+        audioRepository: _FakeAudioRepository(),
+      );
+      addTearDown(audioProvider.dispose);
+
       await tester.pumpWidget(
         MaterialApp(
-          home: ChangeNotifierProvider<QuranReaderProvider>.value(
-            value: provider,
+          home: MultiProvider(
+            providers: [
+              ChangeNotifierProvider<QuranReaderProvider>.value(
+                value: provider,
+              ),
+              ChangeNotifierProvider<AudioProvider>.value(
+                value: audioProvider,
+              ),
+            ],
             child: Scaffold(
               body: const SizedBox.expand(),
               bottomSheet: AyahContextSheet(

@@ -28,6 +28,16 @@
 // stay NULL throughout: no POS/grammar-tag resource was found alongside
 // these on QUL (spec §12.2 "(when available)").
 //
+// Prompt 13 (spec §14) added one more raw QUL resource (a single reciter's
+// Ayah-by-Ayah recitation + word-level segment timing), populating the
+// already-existing `audio_assets`/`audio_segments` tables (schema.dart).
+// That resource is metadata only — an `audio_url` per ayah plus timing
+// segments, not the mp3 bytes themselves — so the app streams `audio_url`
+// at playback time rather than bundling audio the way the 604 QPC V2 fonts
+// were bundled. See tool/resource_manifest_seed.dart's
+// `audioModuleResourceManifestSeed` doc comment for two real data-shape
+// quirks this resource needed handling for.
+//
 // Run from the repo root:
 //   dart run tool/ingest_quran_data.dart
 //
@@ -77,6 +87,26 @@ const String _wordLemmaZipName = 'word-lemma.db.zip';
 const String _wordLemmaDbInnerName = 'word-lemma.db';
 const String _wordStemZipName = 'word-stem.db.zip';
 const String _wordStemDbInnerName = 'word-stem.db';
+
+// --- Audio module (Prompt 13, spec §14) --------------------------------
+// QUL's own download names the file after its internal recitation id (953),
+// not the resource page id in its URL (118) — both are the same resource,
+// see tool/resource_manifest_seed.dart's `audioModuleResourceManifestSeed`.
+const String _recitationZipName =
+    'ayah-recitation-mishari-rashid-al-afasy-murattal-hafs-953.db.zip';
+const String _recitationDbInnerName =
+    'ayah-recitation-mishari-rashid-al-afasy-murattal-hafs-953.db';
+const String _alafasyReciterId = 'mishari-alafasy';
+const String _alafasyReciterName = 'مشاري راشد العفاسي';
+
+/// Matches the `SSSAAA.mp3` filename convention `audio_url` uses (e.g.
+/// `.../alafasy/002061.mp3` = surah 2, ayah 61) — used in `_buildAudio` as
+/// an independent cross-check of the global-to-local ayah_number
+/// conversion, since the filename's own embedded ayah number was recorded
+/// by QUL from the *real* per-surah ayah, unlike the source table's own
+/// `ayah_number` column (see `audioModuleResourceManifestSeed`'s doc
+/// comment in resource_manifest_seed.dart).
+final RegExp _audioUrlAyahPattern = RegExp(r'(\d{3})(\d{3})\.mp3$');
 
 /// The `tafsir_sources` registry rows. Not derived from any downloaded
 /// file — each source's name/author is hardcoded here, same treatment as
@@ -166,6 +196,11 @@ Future<void> main(List<String> args) async {
       entryName: _wordStemDbInnerName,
       outDir: work,
     );
+    final File recitationDb = _extractSingleEntry(
+      zip: File('${rawDir.path}/$_recitationZipName'),
+      entryName: _recitationDbInnerName,
+      outDir: work,
+    );
 
     print('Reading source data...');
     final List<Map<String, dynamic>> wordRows = _querySqliteJson(
@@ -210,6 +245,15 @@ Future<void> main(List<String> args) async {
       'SELECT sw.word_location AS word_location, s.text AS text '
       'FROM stem_words sw JOIN stems s ON sw.stem_id = s.id;',
     );
+    // Ordered by (surah_number, ayah_number) so `_buildAudio` can convert
+    // this resource's own global 1-6236 `ayah_number` into a per-surah
+    // number purely by rank-within-surah — see the manifest seed's doc
+    // comment for why the source's own `ayah_number` can't be used as-is.
+    final List<Map<String, dynamic>> recitationRows = _querySqliteJson(
+      recitationDb.path,
+      'SELECT surah_number, ayah_number, audio_url, segments FROM verses '
+      'ORDER BY surah_number, ayah_number;',
+    );
 
     print(
       'Loaded ${wordRows.length} words, ${pageRows.length} mushaf lines, '
@@ -217,7 +261,8 @@ Future<void> main(List<String> args) async {
       '${ibnKathirRows.length} + ${saadiRows.length} + ${iraabRows.length} '
       'tafsir rows (Ibn Kathir / As-Saadi / Iraab Al-Muyassar), '
       '${rootRows.length} + ${lemmaRows.length} + ${stemRows.length} '
-      'morphology word-location rows (root / lemma / stem).',
+      'morphology word-location rows (root / lemma / stem), '
+      '${recitationRows.length} recitation rows (Mishari Alafasy).',
     );
 
     print('Verifying word glyph text byte-for-byte against source...');
@@ -248,6 +293,12 @@ Future<void> main(List<String> args) async {
       lemmaRows: lemmaRows,
       stemRows: stemRows,
     );
+    final _AudioBuildResult audio = _buildAudio(
+      recitationRows: recitationRows,
+      words: words,
+      reciterId: _alafasyReciterId,
+      reciterName: _alafasyReciterName,
+    );
 
     print('Running integrity checks (spec §24)...');
     final List<String> failures = _runIntegrityChecks(
@@ -272,6 +323,14 @@ Future<void> main(List<String> args) async {
         morphology: morphology,
       ),
     );
+    failures.addAll(
+      _runAudioIntegrityChecks(
+        ayahs: ayahs,
+        words: words,
+        audioAssets: audio.audioAssets,
+        audioSegments: audio.audioSegments,
+      ),
+    );
     if (failures.isNotEmpty) {
       _fail(
         'Integrity checks failed (${failures.length}):\n'
@@ -280,10 +339,22 @@ Future<void> main(List<String> args) async {
       );
     }
     print('All integrity checks passed.');
+    // Not failures — genuine upstream data-shape facts about this
+    // recitation's own segment timing, verified during ingestion (see
+    // tool/resource_manifest_seed.dart's `audioModuleResourceManifestSeed`
+    // doc comment) and reported here so they're visible on every run, not
+    // just discovered once and forgotten.
+    print(
+      "${audio.ayahsWithMarkerSegment} ayahs include a segment for the "
+      "ayah-end marker (the recitation's own verse-end pause); "
+      '${audio.ayahsWithExtraSegment} ayahs (11:44, 20:94, 37:102) have one '
+      'segment beyond even that (an upstream alignment quirk, kept as-is).',
+    );
 
     final DateTime retrievedAt = DateTime(2026, 8, 30);
     final DateTime tafsirRetrievedAt = DateTime(2026, 9, 11);
     final DateTime morphologyRetrievedAt = DateTime(2026, 9, 13);
+    final DateTime audioRetrievedAt = DateTime(2026, 9, 14);
     final List<Map<String, Object?>> manifestRows = [
       ...phase0ResourceManifestSeed.map(
         (ResourceManifestEntry e) =>
@@ -296,6 +367,10 @@ Future<void> main(List<String> args) async {
       ...morphologyModuleResourceManifestSeed.map(
         (ResourceManifestEntry e) =>
             e.copyWith(retrievedAt: morphologyRetrievedAt).toMap(),
+      ),
+      ...audioModuleResourceManifestSeed.map(
+        (ResourceManifestEntry e) =>
+            e.copyWith(retrievedAt: audioRetrievedAt).toMap(),
       ),
     ];
 
@@ -312,6 +387,8 @@ Future<void> main(List<String> args) async {
       tafsirSources: _tafsirSources,
       tafsirEntries: allTafsirEntries,
       morphology: morphology,
+      audioAssets: audio.audioAssets,
+      audioSegments: audio.audioSegments,
       resourceManifest: manifestRows,
     );
 
@@ -329,6 +406,8 @@ Future<void> main(List<String> args) async {
       expectedTafsirSources: _tafsirSources.length,
       expectedTafsirEntries: allTafsirEntries.length,
       expectedMorphology: morphology.length,
+      expectedAudioAssets: audio.audioAssets.length,
+      expectedAudioSegments: audio.audioSegments.length,
       expectedManifestRows: manifestRows.length,
     );
 
@@ -712,6 +791,236 @@ List<Map<String, Object?>> _buildMorphology({
       'grammar_tags': null,
     };
   }).toList();
+}
+
+/// [_buildAudio]'s result: `audio_assets` (one row per ayah) and
+/// `audio_segments` (one row per word-timing entry) rows, plus two
+/// informational counts (not integrity failures — see
+/// tool/resource_manifest_seed.dart's `audioModuleResourceManifestSeed`
+/// doc comment for what they mean).
+class _AudioBuildResult {
+  final List<Map<String, Object?>> audioAssets;
+  final List<Map<String, Object?>> audioSegments;
+  final int ayahsWithMarkerSegment;
+  final int ayahsWithExtraSegment;
+
+  const _AudioBuildResult({
+    required this.audioAssets,
+    required this.audioSegments,
+    required this.ayahsWithMarkerSegment,
+    required this.ayahsWithExtraSegment,
+  });
+}
+
+/// Builds `audio_assets`/`audio_segments` rows (Prompt 13, spec §14) from
+/// the single downloaded recitation resource. [recitationRows] is
+/// `{surah_number, ayah_number, audio_url, segments}` straight from the
+/// source `verses` table, still carrying that resource's own *global*
+/// 1-6236 `ayah_number` (see the manifest seed's doc comment) — converted
+/// here to the app's per-surah `ayah_number` by rank-within-surah, since
+/// [recitationRows] is already ordered `(surah_number, ayah_number)` by the
+/// query that produced it.
+///
+/// `segments` (a JSON string column) decodes to a list of
+/// `[array_index, word_position, start_ms, end_ms]` — `word_position` is
+/// matched against [words]' own `word_key` to resolve `audio_segments
+/// .word_key`, left `null` when it doesn't resolve to a real ('word', not
+/// 'end_marker') word — which happens for the two upstream anomalies the
+/// manifest doc comment documents (a marker-only segment, or the 3-ayah
+/// one-segment-too-many quirk), rather than inventing a word for it.
+_AudioBuildResult _buildAudio({
+  required List<Map<String, dynamic>> recitationRows,
+  required List<Map<String, Object?>> words,
+  required String reciterId,
+  required String reciterName,
+}) {
+  final Map<int, List<Map<String, dynamic>>> rowsBySurah = {};
+  for (final r in recitationRows) {
+    (rowsBySurah[r['surah_number'] as int] ??= []).add(r);
+  }
+
+  final Map<String, String> wordTypeByKey = {
+    for (final w in words) w['word_key'] as String: w['word_type'] as String,
+  };
+
+  final List<Map<String, Object?>> audioAssets = [];
+  final List<Map<String, Object?>> audioSegments = [];
+  int ayahsWithMarkerSegment = 0;
+  int ayahsWithExtraSegment = 0;
+
+  final List<int> surahIdsSorted = rowsBySurah.keys.toList()..sort();
+  for (final surahId in surahIdsSorted) {
+    final List<Map<String, dynamic>> rows = rowsBySurah[surahId]!;
+    for (var i = 0; i < rows.length; i++) {
+      final int localAyahNumber = i + 1;
+      final Map<String, dynamic> row = rows[i];
+      final String ayahKey = '$surahId:$localAyahNumber';
+      final String audioId = '$reciterId:$ayahKey';
+      final String audioUrl = row['audio_url'] as String;
+
+      // Independent cross-check of the global-to-local conversion above:
+      // the audio_url filename itself encodes the real surah/ayah (verified
+      // by hand for a few rows, then here for all 6236) — if the rank-
+      // within-surah conversion were ever wrong, this catches it instead
+      // of silently mislabeling every audio file after the first mistake.
+      final RegExpMatch? urlMatch = _audioUrlAyahPattern.firstMatch(audioUrl);
+      if (urlMatch == null) {
+        _fail(
+          'Recitation audio_url "$audioUrl" does not match the expected '
+          '.../SSSAAA.mp3 filename pattern.',
+        );
+      }
+      final int urlSurah = int.parse(urlMatch.group(1)!);
+      final int urlAyah = int.parse(urlMatch.group(2)!);
+      if (urlSurah != surahId || urlAyah != localAyahNumber) {
+        _fail(
+          'Recitation ayah-numbering mismatch: computed local ayah '
+          '$surahId:$localAyahNumber from rank-within-surah, but audio_url '
+          '"$audioUrl" encodes $urlSurah:$urlAyah.',
+        );
+      }
+
+      final List<dynamic> segmentsRaw =
+          jsonDecode(row['segments'] as String) as List<dynamic>;
+
+      int maxEndMs = 0;
+      bool sawMarkerSegment = false;
+      bool sawExtraSegment = false;
+      for (var arrayIndex = 0; arrayIndex < segmentsRaw.length; arrayIndex++) {
+        final List<dynamic> s = segmentsRaw[arrayIndex] as List<dynamic>;
+        final int wordPosition = s[1] as int;
+        final int startMs = s[2] as int;
+        final int endMs = s[3] as int;
+        if (endMs > maxEndMs) maxEndMs = endMs;
+
+        final String segmentWordKey = '$surahId:$localAyahNumber:$wordPosition';
+        final String? wordType = wordTypeByKey[segmentWordKey];
+        if (wordType == 'end_marker') sawMarkerSegment = true;
+        if (wordType == null) sawExtraSegment = true;
+
+        audioSegments.add({
+          'audio_id': audioId,
+          // The segment array's own 0-based position, NOT `wordPosition` —
+          // in ~1% of ayahs (61 of 6236, verified directly against the
+          // downloaded file) the reciter audibly repeats a phrase mid-ayah,
+          // so the *same* wordPosition appears twice in one ayah's segment
+          // list (e.g. 2:68 says "قال إنه يقول" twice) with two different
+          // timestamps. Using wordPosition as the key would collide on the
+          // audio_segments PK; the array position is always unique and
+          // preserves playback order, which is what actually matters for
+          // driving the highlight forward through a repeat.
+          'segment_index': arrayIndex,
+          'word_key': wordType == 'word' ? segmentWordKey : null,
+          'ayah_key': ayahKey,
+          'start_ms': startMs,
+          'end_ms': endMs,
+        });
+      }
+      if (sawMarkerSegment) ayahsWithMarkerSegment++;
+      if (sawExtraSegment) ayahsWithExtraSegment++;
+
+      audioAssets.add({
+        'audio_id': audioId,
+        'reciter_id': reciterId,
+        'reciter_name': reciterName,
+        'surah_id': surahId,
+        'ayah_key': ayahKey,
+        'file_path': audioUrl,
+        'format': 'mp3',
+        // The source's own `duration` column is empty for all 6236 rows
+        // (verified directly against the downloaded file) — derived from
+        // the last segment's own end_ms instead of left NULL. Only used
+        // for display before the real audio loads; the audio player
+        // itself reports the authoritative duration at playback time.
+        'duration_ms': maxEndMs,
+      });
+    }
+  }
+
+  return _AudioBuildResult(
+    audioAssets: audioAssets,
+    audioSegments: audioSegments,
+    ayahsWithMarkerSegment: ayahsWithMarkerSegment,
+    ayahsWithExtraSegment: ayahsWithExtraSegment,
+  );
+}
+
+/// Audio-specific checks from spec §24 ("every file/segment references a
+/// valid reciter and ayah", "segment ranges are non-negative"), plus this
+/// module's own word_key-resolution invariant.
+List<String> _runAudioIntegrityChecks({
+  required List<Map<String, Object?>> ayahs,
+  required List<Map<String, Object?>> words,
+  required List<Map<String, Object?>> audioAssets,
+  required List<Map<String, Object?>> audioSegments,
+}) {
+  final List<String> failures = [];
+  final Set<String> ayahKeys = ayahs
+      .map((a) => a['ayah_key'] as String)
+      .toSet();
+
+  if (audioAssets.length != ayahs.length) {
+    failures.add(
+      'audio_assets row count (${audioAssets.length}) does not match ayahs '
+      'row count (${ayahs.length}) — expected exactly one audio asset per '
+      'ayah.',
+    );
+  }
+
+  final Set<String> seenAyahKeys = {};
+  final Set<String> seenAudioIds = {};
+  for (final a in audioAssets) {
+    final String ayahKey = a['ayah_key'] as String;
+    final String audioId = a['audio_id'] as String;
+    if (!seenAyahKeys.add(ayahKey)) {
+      failures.add('Duplicate audio_assets row for ayah_key "$ayahKey".');
+    }
+    if (!seenAudioIds.add(audioId)) {
+      failures.add('Duplicate audio_id "$audioId".');
+    }
+    if (!ayahKeys.contains(ayahKey)) {
+      failures.add(
+        'audio_assets row references unknown ayah_key "$ayahKey".',
+      );
+    }
+    final String filePath = a['file_path'] as String;
+    if (!filePath.startsWith('https://') || !filePath.endsWith('.mp3')) {
+      failures.add(
+        'audio_assets row "$audioId" has an unexpected file_path (not an '
+        'https .mp3 URL): "$filePath".',
+      );
+    }
+  }
+
+  final Map<String, String> wordTypeByKey = {
+    for (final w in words) w['word_key'] as String: w['word_type'] as String,
+  };
+  for (final s in audioSegments) {
+    final int startMs = s['start_ms'] as int;
+    final int endMs = s['end_ms'] as int;
+    if (startMs < 0 || endMs < 0 || startMs > endMs) {
+      failures.add(
+        'audio_segments row (audio_id "${s['audio_id']}", segment_index '
+        '${s['segment_index']}) has an invalid time range: $startMs..'
+        '$endMs.',
+      );
+    }
+    final String? wordKey = s['word_key'] as String?;
+    if (wordKey != null && wordTypeByKey[wordKey] != 'word') {
+      failures.add(
+        'audio_segments row references word_key "$wordKey" which is not a '
+        'real word (word_type: ${wordTypeByKey[wordKey]}).',
+      );
+    }
+    final String ayahKey = s['ayah_key'] as String;
+    if (!ayahKeys.contains(ayahKey)) {
+      failures.add(
+        'audio_segments row references unknown ayah_key "$ayahKey".',
+      );
+    }
+  }
+
+  return failures;
 }
 
 // ---------------------------------------------------------------------------
@@ -1119,6 +1428,8 @@ String _buildSqlScript({
   required List<Map<String, Object?>> tafsirSources,
   required List<Map<String, Object?>> tafsirEntries,
   required List<Map<String, Object?>> morphology,
+  required List<Map<String, Object?>> audioAssets,
+  required List<Map<String, Object?>> audioSegments,
   required List<Map<String, Object?>> resourceManifest,
 }) {
   final StringBuffer sql = StringBuffer();
@@ -1154,6 +1465,12 @@ String _buildSqlScript({
   for (final row in morphology) {
     sql.writeln(_insertStatement('morphology', row));
   }
+  for (final row in audioAssets) {
+    sql.writeln(_insertStatement('audio_assets', row));
+  }
+  for (final row in audioSegments) {
+    sql.writeln(_insertStatement('audio_segments', row));
+  }
   for (final row in resourceManifest) {
     sql.writeln(_insertStatement('resource_manifest', row));
   }
@@ -1174,6 +1491,8 @@ void _verifyWrittenDatabase({
   required int expectedTafsirSources,
   required int expectedTafsirEntries,
   required int expectedMorphology,
+  required int expectedAudioAssets,
+  required int expectedAudioSegments,
   required int expectedManifestRows,
 }) {
   final Map<String, int> expected = {
@@ -1184,6 +1503,8 @@ void _verifyWrittenDatabase({
     'tafsir_sources': expectedTafsirSources,
     'tafsir_entries': expectedTafsirEntries,
     'morphology': expectedMorphology,
+    'audio_assets': expectedAudioAssets,
+    'audio_segments': expectedAudioSegments,
     'resource_manifest': expectedManifestRows,
   };
   for (final entry in expected.entries) {
