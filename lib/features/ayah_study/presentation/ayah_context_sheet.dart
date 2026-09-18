@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -162,6 +164,20 @@ class _SheetShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // `SafeArea` alone isn't enough here: this sheet is a persistent
+    // `Scaffold.bottomSheet`, not part of `body`, and on at least one real
+    // device (Xiaomi/HyperOS, on-screen 3-button nav rendered as an overlay
+    // rather than reserved window space) `MediaQuery.padding.bottom`
+    // under-reports the nav bar's real height, so `SafeArea`'s own padding
+    // ends up too small and the audio row renders half-hidden behind the
+    // nav bar icons (user-reported, confirmed on-device). Computing the
+    // padding explicitly with a guaranteed minimum floor — rather than
+    // trusting the system-reported inset alone — fixes it regardless of
+    // whether that inset is accurate on a given device.
+    final double bottomInset = math.max(
+      MediaQuery.of(context).padding.bottom,
+      24.0,
+    );
     return DecoratedBox(
       decoration: const BoxDecoration(
         color: mushafPageColor,
@@ -170,8 +186,9 @@ class _SheetShell extends StatelessWidget {
       ),
       child: SafeArea(
         top: false,
+        bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 12 + bottomInset),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
