@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../shared/theme/mushaf_theme.dart';
 import '../../audio/data/sqlite_audio_repository.dart';
 import '../../audio/domain/audio_repository.dart';
 import '../../audio/presentation/audio_provider.dart';
@@ -211,16 +212,28 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
                 // (CLAUDE.md's Phase 0 entry) — this one small always-
                 // visible corner button is the sole entry point to
                 // [SavedItemsScreen]; without it, bookmarks/notes would be
-                // saveable but never viewable again.
+                // saveable but never viewable again. It used to be a plain
+                // transparent IconButton, which on a surah's first page sits
+                // right on top of the decorative surah-header banner's own
+                // dark ink — same dark ink color as the icon itself, so the
+                // icon visually disappeared into the banner's scrollwork
+                // (user-reported). An opaque circular chip behind the icon
+                // fixes this regardless of what's underneath (banner corner,
+                // ayah text, ...) rather than needing per-page positioning.
                 Positioned(
                   top: 8,
                   left: 8,
                   child: Material(
-                    color: Colors.transparent,
+                    color: mushafPageColor,
+                    shape: const CircleBorder(),
+                    elevation: 2,
                     child: IconButton(
                       tooltip: 'المحفوظات',
                       onPressed: _openSavedItems,
-                      icon: const Icon(Icons.bookmarks_outlined),
+                      icon: const Icon(
+                        Icons.bookmarks_outlined,
+                        color: mushafInkColor,
+                      ),
                     ),
                   ),
                 ),
