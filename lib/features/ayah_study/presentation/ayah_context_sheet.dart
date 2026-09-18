@@ -3,9 +3,13 @@ import 'package:provider/provider.dart';
 
 import '../../../shared/theme/mushaf_theme.dart';
 import '../../../shared/widgets/quran_ayah_text.dart';
+import '../../audio/presentation/audio_playback_row.dart';
 import '../../audio/presentation/audio_provider.dart';
+import '../../bookmarks/presentation/bookmark_action_button.dart';
+import '../../last_read/presentation/mark_as_last_read_button.dart';
 import '../../morphology/domain/morphology_repository.dart';
 import '../../morphology/presentation/morphology_tab_content.dart';
+import '../../notes/presentation/note_action_button.dart';
 import '../../quran_reader/domain/quran_repository.dart';
 import '../../quran_reader/domain/surah.dart';
 import '../../quran_reader/domain/word.dart';
@@ -14,8 +18,8 @@ import '../../tafsir/domain/tafsir_entry.dart';
 import '../../tafsir/domain/tafsir_repository.dart';
 import '../../tafsir/domain/tafsir_source.dart';
 import '../../tafsir/presentation/grammar_tab_content.dart';
+import '../../tafsir/presentation/tafsir_action_button.dart';
 import '../../tafsir/presentation/tafsir_html_text.dart';
-import '../../tafsir/presentation/tafsir_screen.dart';
 
 /// The Ayah Context Sheet (spec §10): opens under
 /// `QuranReaderProvider.isAyahSheetOpen`, i.e. whenever an ayah is
@@ -288,11 +292,13 @@ class _AyahSheetBody extends StatelessWidget {
           const Divider(height: 1),
           _ActionsRow(
             ayahKey: ayahKey,
+            surahId: data.surah.surahId,
+            ayahNumber: data.ayahNumber,
             repository: repository,
             tafsirRepository: tafsirRepository,
           ),
           const SizedBox(height: 4),
-          _AudioRow(ayahKey: ayahKey),
+          AudioPlaybackRow(ayahKey: ayahKey),
         ],
       ),
     );
@@ -639,171 +645,42 @@ class _TafsirSourceContent extends StatelessWidget {
   }
 }
 
+/// The sheet's Tafsir/Note/Bookmark/Continue row (spec §10's Actions row).
+/// Each action is owned and implemented by its own feature — this widget
+/// only composes them side by side, it holds no bookmark/note/last-read
+/// logic of its own (that used to live here directly, which was a Clean
+/// Architecture violation: `ayah_study` reaching into other features'
+/// concerns instead of depending on their public presentation widgets).
 class _ActionsRow extends StatelessWidget {
   const _ActionsRow({
     required this.ayahKey,
+    required this.surahId,
+    required this.ayahNumber,
     required this.repository,
     required this.tafsirRepository,
   });
 
   final String ayahKey;
+  final int surahId;
+  final int ayahNumber;
   final QuranRepository repository;
   final TafsirRepository tafsirRepository;
 
   @override
   Widget build(BuildContext context) {
-    Widget action(IconData icon, String label, {VoidCallback? onPressed}) {
-      final bool enabled = onPressed != null;
-      return Expanded(
-        child: Tooltip(
-          message: enabled ? label : 'قريبًا',
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                onPressed: onPressed,
-                icon: Icon(
-                  icon,
-                  color: mushafInkColor.withValues(alpha: enabled ? 1.0 : 0.4),
-                ),
-              ),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: mushafInkColor.withValues(alpha: enabled ? 1.0 : 0.4),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     return Row(
       children: [
-        action(
-          Icons.menu_book_outlined,
-          'تفسير',
-          // spec §11: "Tafsir open: Tafsir reader replaces/extends the
-          // context layer without losing ayah identity" — a normal
-          // Navigator.push (a full screen, not another sheet, per
-          // TafsirScreen's own doc comment), with the same
-          // QuranReaderProvider instance handed in explicitly so
-          // TafsirScreen's Previous/Next navigation can keep the Mushaf's
-          // own selection in sync (a route pushed this way isn't a
-          // descendant of the ChangeNotifierProvider wrapping the reader,
-          // so `Provider.of`/`context.read` wouldn't find it there).
-          onPressed: () {
-            final quranReaderProvider = context.read<QuranReaderProvider>();
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => TafsirScreen(
-                  initialAyahKey: ayahKey,
-                  quranRepository: repository,
-                  tafsirRepository: tafsirRepository,
-                  quranReaderProvider: quranReaderProvider,
-                ),
-              ),
-            );
-          },
+        TafsirActionButton(
+          ayahKey: ayahKey,
+          quranRepository: repository,
+          tafsirRepository: tafsirRepository,
         ),
-        action(Icons.edit_note_outlined, 'ملاحظة'),
-        action(Icons.bookmark_border, 'إشارة مرجعية'),
-        action(Icons.subdirectory_arrow_left_outlined, 'متابعة'),
-      ],
-    );
-  }
-}
-
-/// Play/pause + reciter name + a simple progress bar (spec §14/§10's
-/// "Audio: Play/Pause, Reciter, Optional synchronized highlight" — the
-/// highlight itself lives on [QuranAyahText], driven from
-/// [_AyahSheetBody]'s own `highlightedWordKey`, not here).
-class _AudioRow extends StatelessWidget {
-  const _AudioRow({required this.ayahKey});
-
-  final String ayahKey;
-
-  String _formatDuration(Duration d) {
-    final minutes = d.inMinutes.remainder(60);
-    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$minutes:$seconds';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final audioProvider = context.watch<AudioProvider>();
-    final bool isCurrentAyah = audioProvider.currentAyahKey == ayahKey;
-    final bool isLoading = isCurrentAyah && audioProvider.isLoading;
-    final bool isPlaying = isCurrentAyah && audioProvider.isPlaying;
-    final Object? error = isCurrentAyah ? audioProvider.error : null;
-    final Duration position = isCurrentAyah
-        ? audioProvider.position
-        : Duration.zero;
-    final Duration duration = isCurrentAyah
-        ? audioProvider.duration
-        : Duration.zero;
-    final String? reciterName = isCurrentAyah
-        ? audioProvider.track?.reciterName
-        : null;
-
-    return Row(
-      children: [
-        IconButton(
-          onPressed: audioProvider.reciterId == null
-              ? null
-              : () => audioProvider.togglePlayPauseOrLoad(ayahKey),
-          icon: isLoading
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Icon(
-                  isPlaying
-                      ? Icons.pause_rounded
-                      : Icons.play_arrow_rounded,
-                  color: mushafInkColor,
-                ),
-        ),
-        Expanded(
-          child: error != null
-              ? const Text(
-                  'تعذّر تشغيل الصوت',
-                  style: TextStyle(fontSize: 12, color: Colors.redAccent),
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      reciterName ?? 'مشاري راشد العفاسي',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: mushafInkColor.withValues(alpha: 0.7),
-                      ),
-                    ),
-                    if (isCurrentAyah && duration > Duration.zero) ...[
-                      const SizedBox(height: 4),
-                      LinearProgressIndicator(
-                        value:
-                            (position.inMilliseconds / duration.inMilliseconds)
-                                .clamp(0.0, 1.0),
-                        minHeight: 3,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${_formatDuration(position)} / '
-                        '${_formatDuration(duration)}',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: mushafInkColor.withValues(alpha: 0.5),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+        NoteActionButton(ayahKey: ayahKey),
+        BookmarkActionButton(ayahKey: ayahKey),
+        MarkAsLastReadButton(
+          ayahKey: ayahKey,
+          surahId: surahId,
+          ayahNumber: ayahNumber,
         ),
       ],
     );

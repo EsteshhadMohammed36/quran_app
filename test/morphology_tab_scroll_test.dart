@@ -8,9 +8,15 @@ import 'package:quran_app/features/audio/domain/audio_track.dart';
 import 'package:quran_app/features/audio/domain/reciter.dart';
 import 'package:quran_app/features/audio/presentation/audio_provider.dart';
 import 'package:quran_app/features/ayah_study/presentation/ayah_context_sheet.dart';
+import 'package:quran_app/features/bookmarks/domain/bookmark.dart';
+import 'package:quran_app/features/bookmarks/domain/bookmark_repository.dart';
+import 'package:quran_app/features/last_read/domain/reading_state.dart';
+import 'package:quran_app/features/last_read/domain/reading_state_repository.dart';
 import 'package:quran_app/features/morphology/domain/morphology_entry.dart';
 import 'package:quran_app/features/morphology/domain/morphology_repository.dart';
 import 'package:quran_app/features/morphology/presentation/morphology_tab_content.dart';
+import 'package:quran_app/features/notes/domain/note.dart';
+import 'package:quran_app/features/notes/domain/note_repository.dart';
 import 'package:quran_app/features/quran_reader/domain/ayah.dart';
 import 'package:quran_app/features/quran_reader/domain/mushaf_page.dart';
 import 'package:quran_app/features/quran_reader/domain/quran_repository.dart';
@@ -21,6 +27,7 @@ import 'package:quran_app/features/tafsir/domain/tafsir_entry.dart';
 import 'package:quran_app/features/tafsir/domain/tafsir_group.dart';
 import 'package:quran_app/features/tafsir/domain/tafsir_repository.dart';
 import 'package:quran_app/features/tafsir/domain/tafsir_source.dart';
+import 'package:quran_app/features/user_library/presentation/user_library_provider.dart';
 
 /// Regression test for the Morphology tab's horizontal word-card strip
 /// (spec §12.2). Verifies via [WidgetTester.drag] — a real Flutter
@@ -91,6 +98,52 @@ class _FakeAudioRepository implements AudioRepository {
     String reciterId,
     String ayahKey,
   ) async => [];
+}
+
+/// Never actually exercised by this test (no bookmark/note is ever
+/// created), but [AyahContextSheet]'s `_ActionsRow` needs a
+/// [UserLibraryProvider] in its ambient tree — see `mushaf_reader_screen
+/// .dart`'s own wiring, which this test mirrors (same reasoning as
+/// `_FakeAudioRepository` above).
+class _FakeBookmarkRepository implements BookmarkRepository {
+  @override
+  Future<List<Bookmark>> getBookmarks() async => [];
+
+  @override
+  Future<bool> isBookmarked(String ayahKey) async => false;
+
+  @override
+  Future<void> addBookmark(String ayahKey) async {}
+
+  @override
+  Future<void> removeBookmark(String ayahKey) async {}
+}
+
+class _FakeNoteRepository implements NoteRepository {
+  @override
+  Future<List<Note>> getAllNotes() async => [];
+
+  @override
+  Future<Note?> getNoteForAyah(String ayahKey) async => null;
+
+  @override
+  Future<Note> upsertNote(String ayahKey, String content) => throw UnimplementedError();
+
+  @override
+  Future<void> deleteNote(String noteId) async {}
+}
+
+class _FakeReadingStateRepository implements ReadingStateRepository {
+  @override
+  Future<ReadingState?> getReadingState() async => null;
+
+  @override
+  Future<void> saveReadingState({
+    required int pageNumber,
+    int? surahId,
+    int? ayahNumber,
+    String? ayahKey,
+  }) async {}
 }
 
 class _FakeTafsirRepository implements TafsirRepository {
@@ -167,6 +220,12 @@ void main() {
       );
       addTearDown(audioProvider.dispose);
 
+      final userLibraryProvider = UserLibraryProvider(
+        bookmarkRepository: _FakeBookmarkRepository(),
+        noteRepository: _FakeNoteRepository(),
+        readingStateRepository: _FakeReadingStateRepository(),
+      );
+
       await tester.pumpWidget(
         MaterialApp(
           home: MultiProvider(
@@ -176,6 +235,9 @@ void main() {
               ),
               ChangeNotifierProvider<AudioProvider>.value(
                 value: audioProvider,
+              ),
+              ChangeNotifierProvider<UserLibraryProvider>.value(
+                value: userLibraryProvider,
               ),
             ],
             child: Scaffold(

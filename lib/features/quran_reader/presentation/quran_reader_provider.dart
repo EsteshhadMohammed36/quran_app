@@ -150,6 +150,18 @@ class QuranReaderProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Selects [ayahKey] and opens the Ayah Context Sheet for it — the same
+  /// end state [selectWord] reaches from a tap, but callable directly by
+  /// key for entry points that don't start from a tapped [Word] (Prompt
+  /// 14's Saved Items screen: tapping a bookmark/note should jump to that
+  /// ayah *and* show its context, not just silently move the page the way
+  /// last-read restoration on launch does).
+  void openAyah(String ayahKey) {
+    _selectedAyahKey = ayahKey;
+    _isAyahSheetOpen = true;
+    notifyListeners();
+  }
+
   /// spec §9.1 "Outside tap": dismiss the selection and close the sheet.
   void clearSelection() {
     if (_selectedAyahKey == null && !_isAyahSheetOpen) return;
