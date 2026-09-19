@@ -317,7 +317,70 @@ are kept below. Git history has the full story if needed.
   ʿImrān p50, An-Nisāʾ p76, Al-Māʾidah p106), then tapped "البقرة" and
   confirmed the reader actually jumped to page 2's Al-Baqarah surah-name
   banner.
-- [ ] Phase 3 remainder — performance pass, validation suite (not started).
+- [x] **Prompt 15 — Performance pass** (spec §21, 2026-09-19). Walked every
+  §21 bullet against the real code instead of assuming; most were already
+  satisfied by earlier prompts (lazy page loading/small cache window —
+  `QuranReaderProvider.cacheWindowRadius`, rule #6; SQLite indexes —
+  `schema.dart`'s `createIndexStatements`; fonts loaded from the asset
+  bundle per-family on demand, never all 604 eagerly; audio already async,
+  never blocks the UI thread). One bullet ("Do not duplicate large Tafsir
+  strings in memory unnecessarily") led to a real, confirmed bug, not just
+  a checklist formality:
+  - **Found**: `_AyahSheetBody` (`ayah_context_sheet.dart`) did
+    `context.watch<AudioProvider>()` at the top of its `build()` — since
+    `AudioProvider` calls `notifyListeners()` on every `just_audio`
+    `positionStream` tick (several times a second while playing), this
+    rebuilt the sheet's *entire* subtree every tick, including whichever
+    study tab was open. The Tafsir/Grammar/Morphology tab content widgets
+    each built their `FutureBuilder` straight off a repository call
+    written inline in `build()` (`future: tafsirRepository.getEntry(...)`,
+    etc.) — a different, well-known Flutter bug: a `future:` argument
+    built fresh every `build()` call re-issues the query and resets the
+    `FutureBuilder` to its loading state, since `Future` identity, not
+    just its resolved value, is what `FutureBuilder` diffs against.
+    Together these meant playing an ayah's audio while its
+    التفسير/الإعراب/الصرف tab was open re-hit SQLite and visibly flickered
+    a loading spinner over real content several times a second. Confirmed
+    on-device (screenshots + `adb logcat` showed no crash, just wasted
+    redundant work) before and after the fix.
+  - **Fixed at the root**: `_AyahSheetBody` no longer watches
+    `AudioProvider` at all. A new small `_HighlightedAyahText` widget wraps
+    just the ayah-text `QuranAyahText` call and uses `context.select` to
+    depend only on the *resolved* highlighted word key — so an audio tick
+    only rebuilds that one small widget, and only when the highlighted
+    word actually changes, never the tabs/actions/audio-row siblings.
+    `activeStudyTab` was similarly upgraded from `context.watch` to
+    `context.select` (same class of bug, different trigger: any
+    `QuranReaderProvider` notification, e.g. a page swipe settling while
+    the sheet stays open, was rebuilding the body too).
+  - **Fixed defensively at the leaves too**: the Tafsir/Grammar/Morphology
+    tab content widgets were each converted from `StatelessWidget` to
+    `StatefulWidget` with a `late final Future` field computed once,
+    instead of calling the repository inline in `build()` — so even an
+    unrelated future rebuild trigger can't make them re-query. Safe
+    because every ayah change already tears down and recreates this whole
+    subtree from a `ValueKey(ayahKey)` higher up (`_AyahSheetContent`), so
+    a `late final` future can never go stale across a real ayah switch —
+    confirmed on-device by selecting a second, different ayah and checking
+    all three tabs loaded that ayah's own content, not the previous
+    selection's.
+  - **Also added**: `PageView.builder`'s `allowImplicitScrolling: true` in
+    `_ReaderPageView` (`mushaf_reader_screen.dart`) — without it, only the
+    current page's widget tree is built; the neighbor page (already
+    prefetched as *data* via the cache window) still had to build/lay out
+    its Arabic text from scratch the instant a swipe gesture started. This
+    makes PageView also build+keep-alive the immediate previous/next page
+    ahead of the gesture — still only 3 pages' widgets ever exist at once,
+    nowhere near rule #6's "never render all 604 simultaneously".
+  - **Verified**: `flutter analyze` clean, `flutter test` all passing.
+    On-device: played an ayah's audio with التفسير open and watched the
+    highlighted word update correctly with no spinner flicker; confirmed
+    `adb logcat` showed zero exceptions across the whole session; swiped
+    pages with the fix in place (no crash, real content); selected a
+    second ayah and confirmed التفسير/الإعراب/الصرف all showed that ayah's
+    own content, not stale data from the first.
+- [ ] Prompt 16 — Automated validation suite (spec §24, not started).
+- [ ] Prompt 17 — Final acceptance tests (spec §26, not started).
 
 ## Known environment issues (this sandboxed dev machine)
 

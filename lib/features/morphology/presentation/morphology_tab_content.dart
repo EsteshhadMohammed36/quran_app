@@ -22,7 +22,7 @@ import '../domain/morphology_repository.dart';
 /// twice. [words] may include the ayah-end ornament row (`Word
 /// .isAyahEndMarker`) — this widget filters it out before building cards,
 /// since it isn't a real Quran word and has no morphology of its own.
-class MorphologyTabContent extends StatelessWidget {
+class MorphologyTabContent extends StatefulWidget {
   const MorphologyTabContent({
     super.key,
     required this.ayahKey,
@@ -37,9 +37,22 @@ class MorphologyTabContent extends StatelessWidget {
   final MorphologyRepository morphologyRepository;
 
   @override
+  State<MorphologyTabContent> createState() => _MorphologyTabContentState();
+}
+
+class _MorphologyTabContentState extends State<MorphologyTabContent> {
+  // Computed once per widget lifetime — see GrammarTabContent's identical
+  // fix (spec §21 performance pass, 2026-09-19) for why calling the
+  // repository directly as `FutureBuilder`'s `future` argument is a bug,
+  // not just a style nit: it re-queries SQLite on every ancestor rebuild,
+  // not just when the ayah changes.
+  late final Future<List<MorphologyEntry>> _entriesFuture =
+      widget.morphologyRepository.getEntriesForAyah(widget.ayahKey);
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<MorphologyEntry>>(
-      future: morphologyRepository.getEntriesForAyah(ayahKey),
+      future: _entriesFuture,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return Padding(
@@ -64,7 +77,7 @@ class MorphologyTabContent extends StatelessWidget {
         // at the source (Word.wordType, computed once during ingestion),
         // not by guessing from position/content in this widget.
         final List<Word> realWords =
-            words.where((w) => !w.isAyahEndMarker).toList();
+            widget.words.where((w) => !w.isAyahEndMarker).toList();
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -85,7 +98,7 @@ class MorphologyTabContent extends StatelessWidget {
                 itemCount: realWords.length,
                 itemBuilder: (context, index) {
                   final word = realWords[index];
-                  final pageNumber = pageByWordIndex[word.wordIndex];
+                  final pageNumber = widget.pageByWordIndex[word.wordIndex];
                   return MorphologyWordCard(
                     word: word,
                     fontFamily: pageNumber == null

@@ -398,6 +398,17 @@ class _ReaderPageView extends StatelessWidget {
       child: PageView.builder(
         controller: pageController,
         itemCount: totalPages,
+        // spec §21 performance pass (2026-09-19): without this, PageView
+        // only builds the current page's widget tree — the neighbor page
+        // (already prefetched as *data* via QuranReaderProvider's
+        // cacheWindowRadius) still has to build/lay out its Arabic text
+        // from scratch the instant a swipe starts, which can visibly hitch
+        // ("Ayah selection/hit testing must remain responsive while
+        // scrolling"). `true` makes PageView also build+keep alive the
+        // immediate previous/next page ahead of the gesture — still only
+        // 3 pages' widgets ever exist at once, nowhere near rule #6's
+        // "never render all 604 pages simultaneously".
+        allowImplicitScrolling: true,
         onPageChanged: (index) {
           context.read<QuranReaderProvider>().onPageSettled(index + 1);
           // spec §19/§26: keep last-read current on every page turn, not

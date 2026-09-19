@@ -226,14 +226,13 @@ class _AyahSheetBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final activeTab = context.watch<QuranReaderProvider>().activeStudyTab;
-    final audioProvider = context.watch<AudioProvider>();
-    // Only highlight while *this* ayah is the one actually playing — a
-    // stale currentWordKey from a previously-played ayah must never leak
-    // onto a newly selected one just because the sheet re-rendered.
-    final String? highlightedWordKey = audioProvider.currentAyahKey == ayahKey
-        ? audioProvider.currentWordKey
-        : null;
+    // `select`, not `watch`: this body must only rebuild when the active
+    // tab itself changes, not on every QuranReaderProvider notification
+    // (e.g. a page swipe settling while the sheet stays open) — same
+    // reasoning as [_HighlightedAyahText] isolating AudioProvider below.
+    final activeTab = context.select<QuranReaderProvider, StudyTab>(
+      (p) => p.activeStudyTab,
+    );
     // Cap the whole sheet's height (spec §10's "compact contextual panel",
     // not a full-screen surface) and let only the ayah text + tab content
     // region scroll internally, instead of the outer Column overflowing
@@ -259,10 +258,10 @@ class _AyahSheetBody extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  QuranAyahText(
+                  _HighlightedAyahText(
+                    ayahKey: ayahKey,
                     words: data.words,
                     pageByWordIndex: data.pageNumberByWordIndex,
-                    highlightedWordKey: highlightedWordKey,
                   ),
                   const SizedBox(height: 12),
                   const Divider(height: 1),
@@ -315,6 +314,47 @@ class _AyahSheetBody extends StatelessWidget {
           AudioPlaybackRow(ayahKey: ayahKey),
         ],
       ),
+    );
+  }
+}
+
+/// Isolates the [AudioProvider] dependency to just the ayah text itself
+/// (spec §21 "Audio playback should not block the Mushaf UI thread" / must
+/// stay responsive) — [AudioProvider] notifies on every playback-position
+/// tick (`just_audio`'s `positionStream`, several times a second while
+/// playing). `_AyahSheetBody` used to `context.watch<AudioProvider>()`
+/// directly, which rebuilt its *entire* subtree — including whichever study
+/// tab was open — on every tick; since `_TafsirTabContent`/
+/// `GrammarTabContent`/`MorphologyTabContent` each build a `FutureBuilder`
+/// straight from a repository call, every one of those rebuilds re-issued
+/// the same SQLite query and visibly flickered a loading spinner over real
+/// content while audio played (confirmed on-device, 2026-09-19 performance
+/// pass). `context.select` here scopes the rebuild to just this word-level
+/// text widget, and only fires when the *resolved* highlighted word key
+/// actually changes (not on every raw position tick).
+class _HighlightedAyahText extends StatelessWidget {
+  const _HighlightedAyahText({
+    required this.ayahKey,
+    required this.words,
+    required this.pageByWordIndex,
+  });
+
+  final String ayahKey;
+  final List<Word> words;
+  final Map<int, int> pageByWordIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    // Only highlight while *this* ayah is the one actually playing — a
+    // stale currentWordKey from a previously-played ayah must never leak
+    // onto a newly selected one just because the sheet re-rendered.
+    final String? highlightedWordKey = context.select<AudioProvider, String?>(
+      (audio) => audio.currentAyahKey == ayahKey ? audio.currentWordKey : null,
+    );
+    return QuranAyahText(
+      words: words,
+      pageByWordIndex: pageByWordIndex,
+      highlightedWordKey: highlightedWordKey,
     );
   }
 }

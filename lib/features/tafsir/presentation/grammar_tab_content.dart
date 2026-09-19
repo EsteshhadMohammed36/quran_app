@@ -17,7 +17,7 @@ import 'tafsir_html_text.dart';
 /// there is no separate grammar domain/data layer (CLAUDE.md rule #4 — this
 /// is the same already-ingested i'rab data spec §13 wants, not a second
 /// dataset), so the widget's only real dependency is [TafsirRepository].
-class GrammarTabContent extends StatelessWidget {
+class GrammarTabContent extends StatefulWidget {
   const GrammarTabContent({
     super.key,
     required this.ayahKey,
@@ -26,6 +26,24 @@ class GrammarTabContent extends StatelessWidget {
 
   final String ayahKey;
   final TafsirRepository tafsirRepository;
+
+  @override
+  State<GrammarTabContent> createState() => _GrammarTabContentState();
+}
+
+class _GrammarTabContentState extends State<GrammarTabContent> {
+  // Computed once per widget lifetime, not inline in `build()` — spec §21
+  // performance pass (2026-09-19): this used to call
+  // `tafsirRepository.getEntry(...)` directly as `FutureBuilder`'s `future`
+  // argument, which re-issues the query on *every* rebuild, not just when
+  // the ayah changes. Since the Ayah Context Sheet rebuilds this tab's
+  // ancestor tree on unrelated provider notifications too (found via audio
+  // playback ticking `AudioProvider` several times a second — see
+  // `_HighlightedAyahText` in `ayah_context_sheet.dart`), that meant this
+  // tab re-hit SQLite and flickered its loading spinner over real content
+  // multiple times a second whenever it was the open tab during playback.
+  late final Future<TafsirEntry> _entryFuture = widget.tafsirRepository
+      .getEntry(iraabMuyassarSourceId, widget.ayahKey);
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +60,7 @@ class GrammarTabContent extends StatelessWidget {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: FutureBuilder<TafsirEntry>(
-        future: tafsirRepository.getEntry(iraabMuyassarSourceId, ayahKey),
+        future: _entryFuture,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Padding(
