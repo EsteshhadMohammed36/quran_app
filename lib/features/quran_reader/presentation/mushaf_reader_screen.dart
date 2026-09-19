@@ -31,9 +31,9 @@ import 'surah_index_screen.dart';
 
 /// The real Mushaf reader (Prompt 9: full 604-page navigation + ayah
 /// selection/hit testing; Prompt 10: the Ayah Context Sheet — spec §9,
-/// §10, §17.1, §21). Supersedes [MushafPrototypeScreen] now that the
-/// renderer is validated on all 4 required pages (spec §25, CLAUDE.md
-/// rule #5 — "any other feature" can now be built on top of it).
+/// §10, §17.1, §21). Supersedes the Phase 0 rendering-only prototype now
+/// that the renderer is validated on all 4 required pages (spec §25,
+/// CLAUDE.md rule #5 — "any other feature" can now be built on top of it).
 ///
 /// Swipes across every page the installed layout has (not a hardcoded 604 —
 /// see [QuranRepository.getPageCount]), lazily loading + caching only a
@@ -461,10 +461,20 @@ class _LazyPageState extends State<_LazyPage> {
         if (page == null) {
           return const Center(child: CircularProgressIndicator());
         }
-        final provider = context.watch<QuranReaderProvider>();
+        // `select`, not `watch`: this page must only rebuild when the
+        // selected ayah itself changes (to move the highlight), not on
+        // every QuranReaderProvider notification — e.g. switching the
+        // sheet's active study tab used to rebuild every visible Mushaf
+        // page too, even though nothing about its rendering changed
+        // (2026-09-19 performance pass, same class of fix as
+        // ayah_context_sheet.dart's _HighlightedAyahText).
+        final selectedAyahKey = context.select<QuranReaderProvider, String?>(
+          (p) => p.selectedAyahKey,
+        );
+        final provider = context.read<QuranReaderProvider>();
         return MushafPageView(
           page: page,
-          selectedAyahKey: provider.selectedAyahKey,
+          selectedAyahKey: selectedAyahKey,
           onWordTap: provider.selectWord,
           onBackgroundTap: provider.clearSelection,
         );

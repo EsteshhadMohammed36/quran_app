@@ -523,6 +523,33 @@ are kept below. Git history has the full story if needed.
   validation" whenever a future schema version bump happens; Offline mode
   (spec §26's last row) has never been explicitly confirmed on a real
   device with networking disabled.
+- [x] **Dead-code cleanup + one more rebuild-scoping fix** (2026-09-20,
+  found during a code-quality pass, not a numbered prompt). Two genuinely
+  unreferenced files deleted after confirming zero imports anywhere in
+  `lib/`: `mushaf_prototype_screen.dart` (the Phase 0 4-page
+  validation-only screen — `main.dart`'s own comment already said it was
+  superseded once the real reader became `home`) and
+  `resource_manifest_repository.dart`/`sqlite_resource_manifest_repository
+  .dart` (a read-side repository for `resource_manifest` that nothing ever
+  called — the table itself is still populated fine, directly via SQL, by
+  `tool/ingest_quran_data.dart`; this pair only would have mattered for an
+  in-app licenses/attribution screen, which doesn't exist yet). Same
+  category as `TafsirScreen`'s earlier removal — confirmed-dead, not
+  speculative.
+  Also found one more instance of the Prompt 15 rebuild-scoping bug class:
+  `_LazyPageState` (`mushaf_reader_screen.dart`) did
+  `context.watch<QuranReaderProvider>()` for the *whole* provider just to
+  read `selectedAyahKey`, so every visible Mushaf page rebuilt on any
+  provider notification (e.g. switching the sheet's study tab), not just
+  on an actual selection change. Narrowed to
+  `context.select<QuranReaderProvider, String?>((p) => p.selectedAyahKey)`.
+  **Verified on-device**: fresh debug build, installed clean; tapped a
+  word on page 283 → correctly selected Al-Baqarah 2:284 and opened the
+  sheet on التفسير with real Ibn Kathir content; switched to الإعراب → real
+  Iraab content loaded correctly; `adb logcat` showed no exceptions
+  throughout. `flutter analyze`/`flutter test` clean (only the
+  pre-existing unrelated `tool/ingest_quran_data.dart` unused-constant
+  warning from the in-progress mushaf-line-corrections work remains).
 
 ## Known environment issues (this sandboxed dev machine)
 

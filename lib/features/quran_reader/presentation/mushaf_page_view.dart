@@ -25,8 +25,8 @@ class MushafPageView extends StatelessWidget {
 
   /// Called with the tapped [Word] (spec §9: tap -> resolve word ->
   /// resolve `surah:ayah` -> select the whole ayah). `null` (the default)
-  /// makes the page non-interactive, e.g. for [MushafPrototypeScreen]
-  /// which only needs to validate rendering, not hit testing.
+  /// makes the page non-interactive — useful for a rendering-only preview
+  /// that doesn't need hit testing.
   final ValueChanged<Word>? onWordTap;
 
   /// Called when a tap lands somewhere on the page that isn't a word —
