@@ -51,6 +51,13 @@ class _FakeQuranRepository implements QuranRepository {
       );
 
   @override
+  Future<List<Surah>> getAllSurahs() => throw UnimplementedError();
+
+  @override
+  Future<Map<int, int>> getFirstPageNumbersForSurahs() =>
+      throw UnimplementedError();
+
+  @override
   Future<Ayah> getAyah(String ayahKey) => throw UnimplementedError();
 
   @override

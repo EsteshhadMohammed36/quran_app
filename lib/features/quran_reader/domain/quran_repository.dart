@@ -9,6 +9,19 @@ import 'word.dart';
 abstract class QuranRepository {
   Future<Surah> getSurah(int surahId);
 
+  /// Every surah (spec §15's `surahs` table), ordered by `surah_id` — the
+  /// Surah Index screen's list (spec §3: "Surah, Juz, Hizb and page
+  /// navigation").
+  Future<List<Surah>> getAllSurahs();
+
+  /// The first Mushaf page each surah opens on, keyed by `surah_id` —
+  /// resolved from `mushaf_lines.line_type == 'surah_name'` (every surah has
+  /// exactly one such line, spec §6), so the Surah Index screen can jump
+  /// straight there. Not derived from `ayahs.page_number`/
+  /// `getPageNumbersForWordIndexes`, since a surah's *banner* line is the
+  /// actual first thing on its opening page, not its first ayah's word.
+  Future<Map<int, int>> getFirstPageNumbersForSurahs();
+
   Future<Ayah> getAyah(String ayahKey);
 
   Future<MushafPage> getPage(int pageNumber);

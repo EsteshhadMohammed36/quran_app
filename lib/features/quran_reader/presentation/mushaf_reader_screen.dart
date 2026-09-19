@@ -27,6 +27,7 @@ import '../domain/mushaf_page.dart';
 import '../domain/quran_repository.dart';
 import 'mushaf_page_view.dart';
 import 'quran_reader_provider.dart';
+import 'surah_index_screen.dart';
 
 /// The real Mushaf reader (Prompt 9: full 604-page navigation + ayah
 /// selection/hit testing; Prompt 10: the Ayah Context Sheet — spec §9,
@@ -143,7 +144,19 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
   /// `ayahs.page_number` itself isn't populated — same ingestion gap as
   /// `words.page_number`, see that repository method's own doc comment),
   /// rather than re-deriving page lookup a third way.
-  Future<void> _jumpToAyah(String ayahKey) async {
+  ///
+  /// [openSheet] controls whether the Ayah Context Sheet pops open on
+  /// arrival (via [QuranReaderProvider.openAyah]) or the ayah is only
+  /// selected/highlighted in place (via [QuranReaderProvider.selectAyahKey],
+  /// which never touches [QuranReaderProvider.isAyahSheetOpen]). Defaults to
+  /// `true` — [SavedItemsScreen]'s jump-to-ayah wants both (a bookmark/note
+  /// nobody can revisit *and see* isn't useful). [_openSearch] passes
+  /// `false` for ayah-text results (user's explicit complaint, 2026-09-19:
+  /// searching the Mushaf's own text and landing straight in the تفسير tab
+  /// instead of the Mushaf page defeated the point of "search the Mushaf")
+  /// but keeps the default `true` for تفسير-scoped results, where jumping
+  /// straight into the sheet is exactly what searching tafsir implies.
+  Future<void> _jumpToAyah(String ayahKey, {bool openSheet = true}) async {
     final words = await _repository.getWords(ayahKey);
     if (words.isEmpty || !mounted) return;
     final pageByWordIndex = await _repository.getPageNumbersForWordIndexes([
@@ -156,7 +169,11 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
     // UserLibraryProvider.updateLastReadPage — no need to call either a
     // second time here.
     _pageController?.jumpToPage(page - 1);
-    _provider?.openAyah(ayahKey);
+    if (openSheet) {
+      _provider?.openAyah(ayahKey);
+    } else {
+      _provider?.selectAyahKey(ayahKey);
+    }
   }
 
   void _openSavedItems() {
@@ -197,7 +214,27 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
           quranRepository: _repository,
           onResultTap: (ayahKey) {
             Navigator.of(context).pop();
-            _jumpToAyah(ayahKey);
+            _jumpToAyah(ayahKey, openSheet: scope == SearchResultKind.tafsir);
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Opens [SurahIndexScreen] (spec §3: "Surah, Juz, Hizb and page
+  /// navigation") — a third deliberate exception to the reader's "no
+  /// permanent chrome" rule, same reasoning as the Saved Items/Search
+  /// corner buttons: without a fixed entry point, jumping straight to a
+  /// named surah would only be possible by swiping through pages one at a
+  /// time.
+  void _openSurahIndex() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => SurahIndexScreen(
+          quranRepository: _repository,
+          onSurahTap: (pageNumber) {
+            Navigator.of(context).pop();
+            _pageController?.jumpToPage(pageNumber - 1);
           },
         ),
       ),
@@ -295,6 +332,27 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
                           : 'بحث في المصحف',
                       onPressed: () => _openSearch(readerProvider),
                       icon: const Icon(Icons.search, color: mushafInkColor),
+                    ),
+                  ),
+                ),
+                // Bottom-left corner, mirroring the Saved Items chip above
+                // it — the reader's fourth (and last planned) deliberate
+                // exception to "no permanent chrome": a fixed way to jump
+                // straight to any surah by name instead of only swiping.
+                Positioned(
+                  bottom: 8,
+                  left: 8,
+                  child: Material(
+                    color: mushafPageColor,
+                    shape: const CircleBorder(),
+                    elevation: 2,
+                    child: IconButton(
+                      tooltip: 'فهرس السور',
+                      onPressed: _openSurahIndex,
+                      icon: const Icon(
+                        Icons.menu_book_outlined,
+                        color: mushafInkColor,
+                      ),
                     ),
                   ),
                 ),

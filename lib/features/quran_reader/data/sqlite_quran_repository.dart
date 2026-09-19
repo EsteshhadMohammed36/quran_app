@@ -34,6 +34,28 @@ class SqliteQuranRepository implements QuranRepository {
   }
 
   @override
+  Future<List<Surah>> getAllSurahs() async {
+    final db = await _appDatabase.database;
+    final rows = await db.query('surahs', orderBy: 'surah_id ASC');
+    return rows.map(Surah.fromMap).toList();
+  }
+
+  @override
+  Future<Map<int, int>> getFirstPageNumbersForSurahs() async {
+    final db = await _appDatabase.database;
+    final rows = await db.rawQuery('''
+      SELECT surah_number, MIN(page_number) AS first_page
+      FROM mushaf_lines
+      WHERE line_type = 'surah_name'
+      GROUP BY surah_number
+    ''');
+    return {
+      for (final row in rows)
+        row['surah_number'] as int: row['first_page'] as int,
+    };
+  }
+
+  @override
   Future<Ayah> getAyah(String ayahKey) async {
     final db = await _appDatabase.database;
     final rows = await db.query(

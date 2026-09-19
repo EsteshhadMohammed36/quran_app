@@ -278,6 +278,45 @@ are kept below. Git history has the full story if needed.
   button (mirrored for RTL, not a submit control — the real submit is
   the leading magnifying-glass `IconButton`, which sits on the visual
   left because `actions` mirrors in RTL).
+- [x] **Surah Index** (`lib/features/quran_reader/presentation/
+  surah_index_screen.dart`, added 2026-09-19 — not one of the original
+  17 prompts; spec §3 lists "Surah, Juz, Hizb and page navigation" as
+  in-scope but it was never broken out into its own prompt, and nothing
+  built it until now). "فهرس السور" — a plain list of all 114 surahs by
+  Arabic name, ayah count, and revelation place, tap-to-jump straight to
+  that surah's opening Mushaf page. Kept inside `quran_reader`'s own
+  `presentation/` rather than a new top-level feature — it needs nothing
+  beyond `QuranRepository`/`Surah`, which already live there (rule #4: no
+  new table, no new feature module for something the existing schema
+  already answers). Two new `QuranRepository` methods back it:
+  `getAllSurahs()` (plain `surahs` table read) and
+  `getFirstPageNumbersForSurahs()`, which resolves each surah's opening
+  page from `mushaf_lines.line_type == 'surah_name'`
+  (`MIN(page_number) GROUP BY surah_number`) — confirmed via direct
+  SQLite query that all 114 surahs have exactly one such line, so every
+  surah always resolves (no NULL/missing page case to handle). This is a
+  different, more direct derivation than `getPageNumbersForWordIndexes`
+  (used elsewhere for a *specific ayah's* page): the surah's banner line
+  itself already carries `page_number`, no word-index range lookup
+  needed.
+  Fourth (and last planned) deliberate exception to the reader's "no
+  permanent chrome" rule, alongside Saved Items (top-left) and Search
+  (top-right): a bottom-left opaque-chip corner button
+  (`Icons.menu_book_outlined`, tooltip "فهرس السور") opens it. Tapping a
+  row calls back to `MushafReaderScreen` (same pattern as
+  `SavedItemsScreen`/`SearchScreen` — only it owns the `PageController`),
+  which pops the screen and calls `_pageController.jumpToPage` directly;
+  unlike `_jumpToAyah`, this never selects/highlights an ayah or opens
+  the context sheet — it's pure page navigation, matching "jump to a
+  surah" rather than "jump to a specific ayah".
+  **Verified on-device (2026-09-19)**: fresh debug build installed on
+  the emulator, screenshotted opening on Al-Fatiha (last-read restore
+  still intact), tapped the new corner button, confirmed the index list's
+  data against a direct SQLite query of the same `surahs`/`mushaf_lines`
+  join (page numbers matched exactly — Al-Fatiḥah p1, Al-Baqarah p2, Āl
+  ʿImrān p50, An-Nisāʾ p76, Al-Māʾidah p106), then tapped "البقرة" and
+  confirmed the reader actually jumped to page 2's Al-Baqarah surah-name
+  banner.
 - [ ] Phase 3 remainder — performance pass, validation suite (not started).
 
 ## Known environment issues (this sandboxed dev machine)
