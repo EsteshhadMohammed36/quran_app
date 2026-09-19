@@ -48,9 +48,18 @@
 //
 // CLAUDE.md rule #1: this script must never alter a single character of
 // Quran script text. It only (a) copies word glyph text byte-for-byte from
-// the QUL script resource into the `words` table, and (b) concatenates
-// those unmodified word strings with a plain space to build
+// the QUL script resource into the `words` table, and (b) copies plain-Unicode
+// Uthmani text byte-for-byte from a separate QUL resource into
 // `ayahs.text_uthmani` — no normalization, no substitution, no cleanup.
+//
+// `ayahs.text_uthmani` was originally built by joining `words`' own glyph
+// strings (added 2026-09-19: that turned out to be wrong — `words.text` is
+// page-specific presentation-form glyphs tied to the QPC V2 Mushaf font, not
+// ordinary Arabic text, so ayah-text search could never match anything typed
+// on a real keyboard). It now comes from a dedicated plain-Unicode Uthmani
+// resource (`uthmani.db.zip`, QUL resource id 88 — see
+// `resource_manifest_seed.dart`) instead; `words.text` is untouched and still
+// feeds Mushaf rendering exactly as before.
 library;
 
 import 'dart:convert';
@@ -69,6 +78,10 @@ const String _layoutZipName = 'qpc-v2-15-lines.db.zip';
 const String _layoutDbInnerName = 'qpc-v2-15-lines.db';
 const String _scriptZipName = 'qpc-v2.db.zip';
 const String _scriptDbInnerName = 'qpc-v2.db';
+// Plain-Unicode Uthmani text (real letters + tashkeel), distinct from the
+// QPC V2 glyph script above — see the file-level doc comment.
+const String _uthmaniZipName = 'uthmani.db.zip';
+const String _uthmaniDbInnerName = 'uthmani.db';
 const String _surahNamesZipName = 'quran-metadata-surah-name.json.zip';
 const String _surahNamesJsonInnerName = 'quran-metadata-surah-name.json';
 
@@ -161,6 +174,11 @@ Future<void> main(List<String> args) async {
       entryName: _scriptDbInnerName,
       outDir: work,
     );
+    final File uthmaniDb = _extractSingleEntry(
+      zip: File('${rawDir.path}/$_uthmaniZipName'),
+      entryName: _uthmaniDbInnerName,
+      outDir: work,
+    );
     final File surahNamesJson = _extractSingleEntry(
       zip: File('${rawDir.path}/$_surahNamesZipName'),
       entryName: _surahNamesJsonInnerName,
@@ -213,6 +231,10 @@ Future<void> main(List<String> args) async {
       'first_word_id, last_word_id, surah_number FROM pages '
       'ORDER BY page_number, line_number;',
     );
+    final List<Map<String, dynamic>> uthmaniVerseRows = _querySqliteJson(
+      uthmaniDb.path,
+      'SELECT surah, ayah, text FROM verses ORDER BY surah, ayah;',
+    );
     final Map<String, dynamic> surahNamesRaw =
         jsonDecode(surahNamesJson.readAsStringSync()) as Map<String, dynamic>;
     final List<Map<String, dynamic>> ibnKathirRows = _querySqliteJson(
@@ -257,6 +279,7 @@ Future<void> main(List<String> args) async {
 
     print(
       'Loaded ${wordRows.length} words, ${pageRows.length} mushaf lines, '
+      '${uthmaniVerseRows.length} plain-Uthmani verse rows, '
       '${surahNamesRaw.length} surah name entries, '
       '${ibnKathirRows.length} + ${saadiRows.length} + ${iraabRows.length} '
       'tafsir rows (Ibn Kathir / As-Saadi / Iraab Al-Muyassar), '
@@ -272,7 +295,10 @@ Future<void> main(List<String> args) async {
     print('Transforming to canonical schema (spec §23.1)...');
     final List<Map<String, Object?>> surahs = _buildSurahs(surahNamesRaw);
     final List<Map<String, Object?>> words = _buildWords(wordRows);
-    final List<Map<String, Object?>> ayahs = _buildAyahs(wordRows);
+    final List<Map<String, Object?>> ayahs = _buildAyahs(
+      wordRows,
+      uthmaniVerseRows,
+    );
     final List<Map<String, Object?>> mushafLines = _buildMushafLines(
       pageRows,
     );
@@ -617,14 +643,17 @@ List<Map<String, Object?>> _buildWords(List<Map<String, dynamic>> wordRows) {
       .toList();
 }
 
-List<Map<String, Object?>> _buildAyahs(List<Map<String, dynamic>> wordRows) {
-  // wordRows is already ordered by global word id, which is the Quran's
-  // natural reading order, so grouping preserves per-ayah word order.
-  final Map<String, List<String>> textBySurahAyah = {};
-  for (final w in wordRows) {
-    final String key = '${w['surah']}:${w['ayah']}';
-    (textBySurahAyah[key] ??= []).add(w['text'] as String);
-  }
+List<Map<String, Object?>> _buildAyahs(
+  List<Map<String, dynamic>> wordRows,
+  List<Map<String, dynamic>> uthmaniVerseRows,
+) {
+  // Unmodified plain-Unicode Uthmani text, byte-for-byte from the dedicated
+  // QUL resource (CLAUDE.md rule #1) — not derived from `words` at all.
+  final Map<String, String> uthmaniTextByAyah = {
+    for (final v in uthmaniVerseRows)
+      '${v['surah']}:${v['ayah']}': v['text'] as String,
+  };
+
   final List<Map<String, Object?>> result = [];
   final Set<String> seen = {};
   for (final w in wordRows) {
@@ -632,17 +661,29 @@ List<Map<String, Object?>> _buildAyahs(List<Map<String, dynamic>> wordRows) {
     final int ayah = w['ayah'] as int;
     final String key = '$surah:$ayah';
     if (!seen.add(key)) continue;
+    final String? text = uthmaniTextByAyah[key];
+    if (text == null) {
+      _fail(
+        'Ayah $key has words but no matching row in the plain-Uthmani '
+        'resource (uthmani.db.zip) — resource mismatch, aborting rather '
+        'than falling back to glyph text.',
+      );
+    }
     result.add({
       'surah_id': surah,
       'ayah_number': ayah,
       'ayah_key': key,
-      // Plain-space join of unmodified word glyph strings — concatenation
-      // only, no character-level transformation (CLAUDE.md rule #1).
-      'text_uthmani': textBySurahAyah[key]!.join(' '),
+      'text_uthmani': text,
       'page_number': null,
       'juz_number': null,
       'hizb_number': null,
     });
+  }
+  if (result.length != uthmaniVerseRows.length) {
+    _fail(
+      'Ayah count mismatch: built ${result.length} ayahs from words but '
+      'the plain-Uthmani resource has ${uthmaniVerseRows.length} verses.',
+    );
   }
   result.sort((a, b) {
     final int s = (a['surah_id'] as int).compareTo(b['surah_id'] as int);

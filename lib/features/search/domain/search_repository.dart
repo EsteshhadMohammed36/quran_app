@@ -8,9 +8,13 @@ import 'search_result.dart';
 /// UI widgets depend on this, never on raw SQLite rows directly (spec §17).
 abstract class SearchRepository {
   /// Ayahs whose own canonical text (`ayahs.text_uthmani`) contains
-  /// [query] — a plain substring match (MVP scope, same as
-  /// `TafsirRepository.search`'s own doc comment: not full-text
-  /// search/ranking).
+  /// [query] — a substring match with tashkeel, tatweel, and alef
+  /// variants folded on both sides, so a query typed on a real keyboard
+  /// (plain letters, no diacritics, plain alef) still matches the fully
+  /// diacritized canonical text written in strict Uthmani orthography.
+  /// Still MVP scope otherwise (same as `TafsirRepository.search`'s own
+  /// doc comment: not full-text search/ranking). The returned
+  /// [SearchResult.snippet] is always the untouched canonical text.
   Future<List<SearchResult>> searchAyahText(String query);
 
   /// Tafsir entries across *every* source (Ibn Kathir, As-Saadi, Iraab

@@ -179,10 +179,53 @@ are kept below. Git history has the full story if needed.
   into the surah-header banner) — the reader's third deliberate exception
   to "no permanent chrome". `SearchRepository` has two separate methods
   (`searchAyahText`/`searchTafsir`), both plain SQL `LIKE` substring
-  matches with **no normalization/diacritic-folding** (rule #1: the query
-  only matches text written with the same diacritics as the canonical
-  Uthmani script/tafsir prose — same MVP scope as
-  `TafsirRepository.search`). `searchTafsir` spans every tafsir source at
+  matches (same MVP scope as `TafsirRepository.search`: not full-text
+  search/ranking).
+
+  **`ayahs.text_uthmani` data-source bug found and fixed 2026-09-19**:
+  it had been built (`_buildAyahs` in `tool/ingest_quran_data.dart`) by
+  plain-space-joining `words.text` — but `words.text` is the QPC V2
+  *glyph* script (page-specific presentation-form codepoints tied to the
+  bundled Mushaf fonts, required for rendering, rule #2), not ordinary
+  Arabic text — e.g. surah 55 ayah 1 was stored as literally two glyph
+  codepoints, not the letters ا ل ر ح م ن. This meant `ayahs.text_uthmani`
+  could never match anything typed on a real keyboard, for *any* query,
+  diacritics or not — a data bug, not a matching bug. Fixed by sourcing
+  `ayahs.text_uthmani` from a dedicated plain-Unicode Uthmani resource
+  instead (QUL "Uthmani (Ayah by Ayah)", `qul-quran-script-uthmani-ayah-by-ayah`
+  in `resource_manifest_seed.dart`, downloaded to
+  `raw_resources/uthmani.db.zip` — rule #4). `words.text` (Mushaf
+  rendering) is completely untouched by this fix, still the QPC V2
+  glyphs it always was.
+
+  **`searchAyahText` also folds tashkeel/tatweel/alef-variants on both
+  sides of the match** (`SqliteSearchRepository._normalizeForMatch`,
+  added 2026-09-19). Two real-keyboard-vs-canonical-orthography gaps,
+  both needed even after the data-source fix above: (1) most users type
+  queries without diacritics, but the real Uthmani text is always fully
+  diacritized (tashkeel + Quranic annotation marks + a tatweel filler
+  character, e.g. U+0640 sits *inside* "ٱلرَّحْمَـٰنُ" between م and
+  ن); (2) Uthmani orthography spells certain letters with special alef
+  variants in fixed positions (e.g. the "ال" definite article is always
+  alef *wasla* ٱ, never plain ا) that a keyboard can't produce. Neither
+  violates rule #1: normalization only ever touches a transient
+  in-memory copy used to decide match/no-match — `ayahs.text_uthmani` in
+  the database and the `snippet` returned to the UI are always the
+  untouched canonical string, nothing stored or displayed is ever
+  normalized. `searchTafsir` stays exact-match (tafsir prose isn't
+  written in strict Uthmani orthography, so it didn't have either
+  problem). **Verified on-device (2026-09-19, ADBKeyboard, fresh install
+  + `pm clear` to force the corrected `quran.db` asset to re-copy)**:
+  typing "الرحمن" with no diacritics (sheet closed, ayah-text scope)
+  returned 10+ correctly-ordered real hits across Al-Fatiha, Al-Baqarah,
+  Ar-Ra'd, Al-Isra, Maryam, etc., each snippet showing the untouched
+  fully-diacritized canonical text; tapping a result jumped to Al-Fatiha
+  1:1, highlighted the ayah on the Mushaf, and opened the Ayah Context
+  Sheet on its default التفسير tab — same as before this fix. Before
+  both fixes landed this same query returned "لا توجد نتائج" (confirmed
+  on-device at each intermediate stage: glyph-data bug alone still
+  returned nothing; data fix alone still returned nothing until the
+  tashkeel/tatweel/alef folding was added too). `searchTafsir` spans every tafsir source at
   once (unlike the single-source-scoped search already on `TafsirScreen`)
   and tags each hit with its source name so a "الإعراب الميسر" hit isn't
   mistaken for general commentary. Selecting a result reuses the reader's

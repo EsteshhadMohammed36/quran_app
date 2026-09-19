@@ -73,6 +73,34 @@ const List<ResourceManifestEntry> phase0ResourceManifestSeed = [
         'via Quranic Universal Library (qul.tarteel.ai).',
   ),
 
+  // Plain-Unicode Uthmani text (real Arabic letters + combining tashkeel),
+  // added 2026-09-19 to fill a real gap the 5 Prompt 5/6 resources left:
+  // the glyph-word-by-word resource above is correct and required for
+  // Mushaf rendering (rule #2), but its codepoints are page-specific
+  // presentation-form glyphs, not ordinary Arabic text — `ayahs.text_uthmani`
+  // had been built by joining those glyphs (see `_buildAyahs` history), so
+  // ayah-text search could never match anything typed on a real keyboard.
+  // This resource is what `ayahs.text_uthmani` is actually built from now;
+  // `words.text` (Mushaf rendering) is untouched, still the QPC V2 glyphs.
+  ResourceManifestEntry(
+    resourceId: 'qul-quran-script-uthmani-ayah-by-ayah',
+    resourceName: 'Uthmani (Ayah by Ayah)',
+    provider: 'QUL',
+    category: 'quran-script',
+    sourceUrl: 'https://qul.tarteel.ai/resources/quran-script/88',
+    downloadFormat: 'sqlite',
+    versionOrRevision: 'file dated 2026-09-19 (date of download)',
+    licenseOrTermsUrl: 'https://www.tarteel.ai/terms',
+    sha256:
+        'b3fe3dbf31a1a5e932a5252d191f685fc2508c2ac73b201468b4342537beb838',
+    targetTableOrAssetPath: 'ayahs.text_uthmani',
+    compatibilityGroup: 'madinah-v2-qpc-v2-hafs',
+    status: ResourceManifestStatus.pending,
+    attributionText:
+        'Uthmani script (Ayah by Ayah), via Quranic Universal Library '
+        '(qul.tarteel.ai).',
+  ),
+
   // --- Font (spec section7) -------------------------------------------------
   ResourceManifestEntry(
     resourceId: 'qul-font-qpc-v2',
