@@ -92,8 +92,8 @@ are kept below. Git history has the full story if needed.
     not urgent since nothing reads it). Anywhere a word/ayah's page is
     needed, derive it via `QuranRepository.getPageNumbersForWordIndexes()`
     (reads `mushaf_lines`' own `first_word_id`/`last_word_id` ranges
-    instead). Used by the Ayah Context Sheet, `TafsirScreen`, and the Saved
-    Items screen's jump-to-ayah.
+    instead). Used by the Ayah Context Sheet and the Saved Items screen's
+    jump-to-ayah.
   - `words.word_type` is `'word'` or `'end_marker'` — the last
     `word_position` in every ayah is the ayah-end ornament glyph, not a
     real word (needed for real Mushaf rendering, rule #2, but has no
@@ -121,12 +121,15 @@ are kept below. Git history has the full story if needed.
     an earlier build; if study-tab content ever looks wrong, check this
     first. "الإعراب" reads the Iraab Al-Muyassar tafsir source directly via
     `TafsirRepository.getEntry` (`iraabMuyassarSourceId` constant) — it is
-    *not* a separate dataset/table (rule #4). `TafsirScreen` (full-screen,
-    opened via `Navigator.push`) takes `QuranReaderProvider` as an explicit
-    constructor param, not ambient `context.read` — it isn't a descendant
-    of the reader's own `ChangeNotifierProvider`. As-Saadi has 59 ayahs
-    with genuinely no independent commentary + 4 rows holding only a
-    placeholder symbol (upstream data quirk, kept verbatim per rule #1's
+    *not* a separate dataset/table (rule #4). The "التفسير" tab's own
+    accordion (Ibn Kathir + As-Saadi) is `TafsirTabContent` in
+    `lib/features/tafsir/presentation/tafsir_tab_content.dart` — moved
+    there 2026-09-19 from being three private classes inline inside
+    `ayah_context_sheet.dart` (an `ayah_study` architecture violation: that
+    file belongs to `tafsir`'s own presentation layer, same as
+    `GrammarTabContent`/`MorphologyTabContent` already were). As-Saadi has
+    59 ayahs with genuinely no independent commentary + 4 rows holding only
+    a placeholder symbol (upstream data quirk, kept verbatim per rule #1's
     spirit — not a bug to "fix").
   - **Morphology module**: root/lemma/stem populated from 3 QUL word-level
     resources; `part_of_speech`/`grammar_tags` are permanently `NULL` — no
@@ -226,8 +229,9 @@ are kept below. Git history has the full story if needed.
   on-device at each intermediate stage: glyph-data bug alone still
   returned nothing; data fix alone still returned nothing until the
   tashkeel/tatweel/alef folding was added too). `searchTafsir` spans every tafsir source at
-  once (unlike the single-source-scoped search already on `TafsirScreen`)
-  and tags each hit with its source name so a "الإعراب الميسر" hit isn't
+  once (unlike the single-source-scoped accordion already on the sheet's
+  التفسير tab, `TafsirTabContent`) and tags each hit with its source name
+  so a "الإعراب الميسر" hit isn't
   mistaken for general commentary. Selecting a result reuses the reader's
   existing `_jumpToAyah`.
   **`SearchScreen` is single-scope per instance, not a combined
@@ -257,27 +261,40 @@ are kept below. Git history has the full story if needed.
   redundant once "التفسير" already sits as a first-class study tab,
   `tafsir_action_button.dart` deleted. That was the *only* thing that
   ever pushed the separate full-screen `TafsirScreen`
-  (`lib/features/tafsir/presentation/tafsir_screen.dart`) — it's now
-  unreachable/orphaned dead code (still analyzes clean since nothing
-  references it incorrectly, just nothing references it at all). Leaving
-  it in place for now since it's not otherwise in the way; worth either
-  deleting it or wiring a new entry point to it in a future prompt rather
-  than letting it silently bit-rot.
+  (`lib/features/tafsir/presentation/tafsir_screen.dart`), which made it
+  unreachable/orphaned dead code — confirmed nothing imported it anywhere
+  in `lib/`, then deleted outright 2026-09-19 (user's explicit call: the
+  Tafsir feature itself wasn't retired, just relocated into the study-tabs
+  row, so keeping a dead second entry point around added nothing). The
+  content it used to show is `TafsirTabContent` now (see the Tafsir module
+  entry above) — that's the canonical place to extend Tafsir-tab behavior
+  going forward, not a revived `TafsirScreen`.
   **Verified on-device with real typed Arabic input** (2026-09-19, via
   ADBKeyboard — see "Known environment issues" below): with the sheet
   closed, search hint reads "ابحثي في آيات المصحف..." and a typed query
   returns only ayah-text hits; with the sheet open on التفسير, hint reads
   "ابحثي في التفسير..." and the same query ("الرحمن") returns 273
   tafsir-only hits, correctly labeled, no ayah-text section leaking in
-  either direction. Tapping a result correctly jumps to that ayah and
-  opens the Ayah Context Sheet with real content (always opens on the
-  sheet's default التفسير tab regardless of which source the hit came
-  from — `onResultTap` only carries `ayahKey`, not the matched source;
-  acceptable MVP scope, not wired to auto-select a tab). Also confirmed:
-  the arrow glyph in the app bar is Flutter's auto-inserted **back**
-  button (mirrored for RTL, not a submit control — the real submit is
-  the leading magnifying-glass `IconButton`, which sits on the visual
-  left because `actions` mirrors in RTL).
+  either direction. Also confirmed: the arrow glyph in the app bar is
+  Flutter's auto-inserted **back** button (mirrored for RTL, not a submit
+  control — the real submit is the leading magnifying-glass `IconButton`,
+  which sits on the visual left because `actions` mirrors in RTL).
+  **Tapping a result's jump behavior depends on the search scope**
+  (changed 2026-09-19, user's explicit complaint): originally
+  `_jumpToAyah` always force-opened the Ayah Context Sheet on its default
+  التفسير tab regardless of which scope the hit came from (`onResultTap`
+  only ever carried `ayahKey`, not the matched source). For an ayah-text
+  search this defeated the point — "search the Mushaf" landed the user
+  straight in the tafsir sheet instead of the Mushaf page itself. Fixed by
+  giving `_jumpToAyah` an `openSheet` param: ayah-text results now call
+  `QuranReaderProvider.selectAyahKey` (jumps the page, highlights the
+  ayah, leaves `isAyahSheetOpen` untouched — same primitive last-read
+  restoration already used) instead of `openAyah`; تفسير-scoped results
+  still pass `openSheet: true` (searching tafsir and landing in the
+  tafsir sheet is exactly what's expected there). `SavedItemsScreen`'s
+  jump-to-ayah is unaffected — still always opens the sheet (its own
+  doc comment's rationale still holds: a bookmark/note nobody can revisit
+  *and see* isn't useful).
 - [x] **Surah Index** (`lib/features/quran_reader/presentation/
   surah_index_screen.dart`, added 2026-09-19 — not one of the original
   17 prompts; spec §3 lists "Surah, Juz, Hizb and page navigation" as
@@ -331,18 +348,18 @@ are kept below. Git history has the full story if needed.
     `AudioProvider` calls `notifyListeners()` on every `just_audio`
     `positionStream` tick (several times a second while playing), this
     rebuilt the sheet's *entire* subtree every tick, including whichever
-    study tab was open. The Tafsir/Grammar/Morphology tab content widgets
-    each built their `FutureBuilder` straight off a repository call
-    written inline in `build()` (`future: tafsirRepository.getEntry(...)`,
-    etc.) — a different, well-known Flutter bug: a `future:` argument
-    built fresh every `build()` call re-issues the query and resets the
-    `FutureBuilder` to its loading state, since `Future` identity, not
-    just its resolved value, is what `FutureBuilder` diffs against.
-    Together these meant playing an ayah's audio while its
-    التفسير/الإعراب/الصرف tab was open re-hit SQLite and visibly flickered
-    a loading spinner over real content several times a second. Confirmed
-    on-device (screenshots + `adb logcat` showed no crash, just wasted
-    redundant work) before and after the fix.
+    study tab was open. `TafsirTabContent`'s `_TafsirSourceContent`,
+    `GrammarTabContent`, and `MorphologyTabContent` each built their
+    `FutureBuilder` straight off a repository call written inline in
+    `build()` (`future: tafsirRepository.getEntry(...)`, etc.) — a
+    different, well-known Flutter bug: a `future:` argument built fresh
+    every `build()` call re-issues the query and resets the `FutureBuilder`
+    to its loading state, since `Future` identity, not just its resolved
+    value, is what `FutureBuilder` diffs against. Together these meant
+    playing an ayah's audio while its التفسير/الإعراب/الصرف tab was open
+    re-hit SQLite and visibly flickered a loading spinner over real content
+    several times a second. Confirmed on-device (screenshots + `adb logcat`
+    showed no crash, just wasted redundant work) before and after the fix.
   - **Fixed at the root**: `_AyahSheetBody` no longer watches
     `AudioProvider` at all. A new small `_HighlightedAyahText` widget wraps
     just the ayah-text `QuranAyahText` call and uses `context.select` to
@@ -353,17 +370,17 @@ are kept below. Git history has the full story if needed.
     `context.select` (same class of bug, different trigger: any
     `QuranReaderProvider` notification, e.g. a page swipe settling while
     the sheet stays open, was rebuilding the body too).
-  - **Fixed defensively at the leaves too**: the Tafsir/Grammar/Morphology
-    tab content widgets were each converted from `StatelessWidget` to
-    `StatefulWidget` with a `late final Future` field computed once,
-    instead of calling the repository inline in `build()` — so even an
-    unrelated future rebuild trigger can't make them re-query. Safe
-    because every ayah change already tears down and recreates this whole
-    subtree from a `ValueKey(ayahKey)` higher up (`_AyahSheetContent`), so
-    a `late final` future can never go stale across a real ayah switch —
-    confirmed on-device by selecting a second, different ayah and checking
-    all three tabs loaded that ayah's own content, not the previous
-    selection's.
+  - **Fixed defensively at the leaves too**: `_TafsirSourceContent`,
+    `GrammarTabContent`, and `MorphologyTabContent` were each converted
+    from `StatelessWidget` to `StatefulWidget` with a `late final Future`
+    field computed once, instead of calling the repository inline in
+    `build()` — so even an unrelated future rebuild trigger can't make them
+    re-query. Safe because every ayah change already tears down and
+    recreates this whole subtree from a `ValueKey(ayahKey)` higher up
+    (`_AyahSheetContent`), so a `late final` future can never go stale
+    across a real ayah switch — confirmed on-device by selecting a second,
+    different ayah and checking all three tabs loaded that ayah's own
+    content, not the previous selection's.
   - **Also added**: `PageView.builder`'s `allowImplicitScrolling: true` in
     `_ReaderPageView` (`mushaf_reader_screen.dart`) — without it, only the
     current page's widget tree is built; the neighbor page (already
@@ -372,14 +389,51 @@ are kept below. Git history has the full story if needed.
     makes PageView also build+keep-alive the immediate previous/next page
     ahead of the gesture — still only 3 pages' widgets ever exist at once,
     nowhere near rule #6's "never render all 604 simultaneously".
-  - **Verified**: `flutter analyze` clean, `flutter test` all passing.
-    On-device: played an ayah's audio with التفسير open and watched the
-    highlighted word update correctly with no spinner flicker; confirmed
-    `adb logcat` showed zero exceptions across the whole session; swiped
-    pages with the fix in place (no crash, real content); selected a
-    second ayah and confirmed التفسير/الإعراب/الصرف all showed that ayah's
-    own content, not stale data from the first.
-- [ ] Prompt 16 — Automated validation suite (spec §24, not started).
+  - **Verified**: `flutter analyze` clean, `flutter test` all passing
+    (including `morphology_tab_scroll_test.dart`, unaffected by the
+    `StatefulWidget` conversion). On-device: played an ayah's audio with
+    التفسير open and watched the highlighted word update correctly with no
+    spinner flicker; confirmed `adb logcat` showed zero exceptions across
+    the whole session; swiped pages with the fix in place (no crash, real
+    content); selected a second ayah and confirmed التفسير/الإعراب/الصرف
+    all showed that ayah's own content, not stale data from the first.
+- [x] **Prompt 16 — Automated validation suite** (`tool/validate_quran_db.dart`,
+  spec §24, 2026-09-19). Checked first before writing anything: `tool/
+  ingest_quran_data.dart` already implements every spec §24 bullet
+  (`_runIntegrityChecks`/`_runTafsirIntegrityChecks`/
+  `_runMorphologyIntegrityChecks`/`_runAudioIntegrityChecks`) and gates
+  whether `quran.db` gets written at all — but only as part of a full
+  re-ingestion from `raw_resources/` (git-ignored), validating the
+  *in-memory* rows before they're written to SQL, not the actual shipped
+  bytes. That's not something a future contributor, reviewer, or CI can run
+  standalone without first re-downloading every raw QUL resource. This new
+  script fills that specific gap: it runs the identical spec §24 checks as
+  plain SQL directly against the real `assets/database/quran.db` (checked
+  into git), needs nothing but the `sqlite3` CLI already required by every
+  other `tool/` script, and can be run any time —
+  `dart run tool/validate_quran_db.dart` (`--db=path` to point at a
+  different file). 19 checks total, covering every literal bullet: Quran
+  integrity (114 surahs, expected ayah counts, no duplicate
+  (surah_id, ayah_number), no orphan words, no invalid word positions),
+  Mushaf layout (page range/no gaps, unique line numbers per page,
+  first_word_id <= last_word_id, all referenced words exist, supported
+  line_types, valid surah_name → surah_number), Tafsir (unique source IDs,
+  valid source/ayah/group references, no dangling group references),
+  Morphology (every row maps to a real word_key), and Audio (valid
+  reciter/ayah references, non-negative segment ranges). Prints
+  `[PASS]`/`[FAIL]` per check with up to 5 offending rows on failure, exits
+  non-zero if anything fails.
+  **Verified the checks actually detect failures, not just pass vacuously**:
+  built a small deliberately-broken throwaway SQLite db (duplicate ayah,
+  orphan word, gap in word positions, unsupported line_type, invalid
+  surah_number, unknown tafsir source_id, dangling morphology word_key,
+  empty reciter_id, inverted segment range) and confirmed the script caught
+  all 10 injected violations by name with correct offending-row detail,
+  while every unrelated check on that same broken db still passed cleanly
+  (no false positives). Then ran it for real against the shipped
+  `assets/database/quran.db`: all 19 checks pass, confirming the actual
+  bundled database is sound per every spec §24 requirement as of this date.
+  `flutter analyze` clean.
 - [ ] Prompt 17 — Final acceptance tests (spec §26, not started).
 
 ## Known environment issues (this sandboxed dev machine)

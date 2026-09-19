@@ -78,6 +78,9 @@ const String _layoutZipName = 'qpc-v2-15-lines.db.zip';
 const String _layoutDbInnerName = 'qpc-v2-15-lines.db';
 const String _scriptZipName = 'qpc-v2.db.zip';
 const String _scriptDbInnerName = 'qpc-v2.db';
+// Checked-in (not git-ignored, unlike raw_resources/) patch over the raw
+// layout resource above — see `_loadMushafLineCorrections`'s doc comment.
+const String _mushafLineCorrectionsFileName = 'mushaf_line_corrections.json';
 // Plain-Unicode Uthmani text (real letters + tashkeel), distinct from the
 // QPC V2 glyph script above — see the file-level doc comment.
 const String _uthmaniZipName = 'uthmani.db.zip';

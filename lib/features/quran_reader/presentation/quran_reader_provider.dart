@@ -138,12 +138,15 @@ class QuranReaderProvider extends ChangeNotifier {
   }
 
   /// Updates the selected ayah directly by key, keeping the sheet open and
-  /// the active study tab unchanged — used by [TafsirScreen]'s Previous/
-  /// Next ayah navigation (spec §11.1) so returning to the Mushaf ("Return
-  /// to Mushaf") still shows whichever ayah was last viewed in Tafsir as
-  /// selected (spec §11: "Tafsir reader ... without losing ayah identity").
-  /// Unlike [selectWord], this never touches [isAyahSheetOpen] — Tafsir
-  /// navigation shouldn't itself pop the sheet open if it was closed.
+  /// the active study tab unchanged. Used by [MushafReaderScreen] to
+  /// restore the saved last-read ayah on launch (spec §19/§26 "Last-read
+  /// state must restore ... without returning to page 1"), and previously
+  /// also by the now-removed full-screen TafsirScreen's Previous/Next ayah
+  /// navigation (spec §11.1) — that screen's Tafsir entry point has since
+  /// moved into the Ayah Context Sheet's التفسير tab ([TafsirTabContent]),
+  /// but this method stayed useful on its own for the restore-on-launch
+  /// case. Unlike [selectWord], this never touches [isAyahSheetOpen] — it
+  /// shouldn't itself pop the sheet open if it was closed.
   void selectAyahKey(String ayahKey) {
     if (_selectedAyahKey == ayahKey) return;
     _selectedAyahKey = ayahKey;
