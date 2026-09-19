@@ -6,20 +6,28 @@ import '../../quran_reader/domain/quran_repository.dart';
 import '../domain/search_repository.dart';
 import '../domain/search_result.dart';
 
-/// App-wide search across Quran ayah text and tafsir commentary together
-/// (`lib/features/search`, spec §17's architecture tree — no numbered spec
-/// section of its own; built per the user's explicit request: "البحث في
-/// نص الآيات والتفسير مع بعض"). Search-on-submit rather than live/
-/// debounced-as-you-type, matching [TafsirScreen]'s own existing
-/// per-source search control convention.
+/// Scoped search (`lib/features/search`, spec §17's architecture tree — no
+/// numbered spec section of its own). Deliberately single-scope per screen
+/// instance rather than one combined "search everything and group by kind"
+/// screen (an earlier version of this did that; the user explicitly asked
+/// for it to be split instead): [scope] is decided entirely by the caller,
+/// not by this widget — `MushafReaderScreen` reads its own
+/// `QuranReaderProvider` state (is the Ayah Context Sheet open, and is its
+/// active tab `StudyTab.tafsir`?) to pick `SearchResultKind.tafsir` vs
+/// `.ayahText` before pushing this screen. [SearchScreen] itself stays
+/// ignorant of *why* a scope was chosen — that decision belongs to
+/// whoever is currently showing the Mushaf, not to the search feature, so
+/// `search` never has to depend on `quran_reader`'s presentation state.
 class SearchScreen extends StatefulWidget {
   const SearchScreen({
     super.key,
+    required this.scope,
     required this.searchRepository,
     required this.quranRepository,
     required this.onResultTap,
   });
 
+  final SearchResultKind scope;
   final SearchRepository searchRepository;
   final QuranRepository quranRepository;
 
@@ -30,18 +38,11 @@ class SearchScreen extends StatefulWidget {
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
-class _SearchResults {
-  final List<SearchResult> ayahResults;
-  final List<SearchResult> tafsirResults;
-
-  const _SearchResults({required this.ayahResults, required this.tafsirResults});
-
-  bool get isEmpty => ayahResults.isEmpty && tafsirResults.isEmpty;
-}
-
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _controller = TextEditingController();
-  Future<_SearchResults>? _resultsFuture;
+  Future<List<SearchResult>>? _resultsFuture;
+
+  bool get _isTafsirScope => widget.scope == SearchResultKind.tafsir;
 
   @override
   void dispose() {
@@ -56,12 +57,10 @@ class _SearchScreenState extends State<SearchScreen> {
     });
   }
 
-  Future<_SearchResults> _search(String query) async {
-    final results = await Future.wait([
-      widget.searchRepository.searchAyahText(query),
-      widget.searchRepository.searchTafsir(query),
-    ]);
-    return _SearchResults(ayahResults: results[0], tafsirResults: results[1]);
+  Future<List<SearchResult>> _search(String query) {
+    return _isTafsirScope
+        ? widget.searchRepository.searchTafsir(query)
+        : widget.searchRepository.searchAyahText(query);
   }
 
   @override
@@ -79,8 +78,10 @@ class _SearchScreenState extends State<SearchScreen> {
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => _runSearch(),
             style: const TextStyle(color: mushafInkColor),
-            decoration: const InputDecoration(
-              hintText: 'ابحث في القرآن والتفسير...',
+            decoration: InputDecoration(
+              hintText: _isTafsirScope
+                  ? 'ابحثي في التفسير...'
+                  : 'ابحثي في آيات المصحف...',
               border: InputBorder.none,
             ),
           ),
@@ -96,9 +97,13 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget _buildBody() {
     final future = _resultsFuture;
     if (future == null) {
-      return const _MessageState(message: 'اكتبي كلمة أو عبارة للبحث فيها.');
+      return _MessageState(
+        message: _isTafsirScope
+            ? 'اكتبي كلمة أو عبارة للبحث في التفسير.'
+            : 'اكتبي كلمة أو عبارة للبحث في آيات المصحف.',
+      );
     }
-    return FutureBuilder<_SearchResults>(
+    return FutureBuilder<List<SearchResult>>(
       future: future,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
@@ -113,24 +118,12 @@ class _SearchScreenState extends State<SearchScreen> {
         }
         return ListView(
           children: [
-            if (results.ayahResults.isNotEmpty) ...[
-              _SectionHeader('القرآن (${results.ayahResults.length})'),
-              for (final result in results.ayahResults)
-                _SearchResultTile(
-                  result: result,
-                  quranRepository: widget.quranRepository,
-                  onTap: () => widget.onResultTap(result.ayahKey),
-                ),
-            ],
-            if (results.tafsirResults.isNotEmpty) ...[
-              _SectionHeader('التفسير (${results.tafsirResults.length})'),
-              for (final result in results.tafsirResults)
-                _SearchResultTile(
-                  result: result,
-                  quranRepository: widget.quranRepository,
-                  onTap: () => widget.onResultTap(result.ayahKey),
-                ),
-            ],
+            for (final result in results)
+              _SearchResultTile(
+                result: result,
+                quranRepository: widget.quranRepository,
+                onTap: () => widget.onResultTap(result.ayahKey),
+              ),
           ],
         );
       },
@@ -153,23 +146,6 @@ class _MessageState extends StatelessWidget {
           textAlign: TextAlign.center,
           style: TextStyle(color: mushafInkColor.withValues(alpha: 0.6)),
         ),
-      ),
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.label);
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-      child: Text(
-        label,
-        style: const TextStyle(fontWeight: FontWeight.bold, color: mushafInkColor),
       ),
     );
   }

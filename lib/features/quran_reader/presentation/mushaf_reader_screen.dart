@@ -16,6 +16,7 @@ import '../../notes/data/sqlite_note_repository.dart';
 import '../../notes/domain/note_repository.dart';
 import '../../search/data/sqlite_search_repository.dart';
 import '../../search/domain/search_repository.dart';
+import '../../search/domain/search_result.dart';
 import '../../search/presentation/search_screen.dart';
 import '../../tafsir/data/sqlite_tafsir_repository.dart';
 import '../../tafsir/domain/tafsir_repository.dart';
@@ -175,10 +176,23 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
     );
   }
 
-  void _openSearch() {
+  /// Scope is decided here, not inside [SearchScreen] itself (spec §10's
+  /// sheet stays visible over the Mushaf page, so "reading the Mushaf" and
+  /// "التفسير tab open" are two states of the *same* screen, not two
+  /// different screens): تفسير open → search only tafsir; anything else
+  /// (sheet closed, or open on a different tab) → search only ayah text.
+  /// User's explicit request, replacing an earlier version that searched
+  /// both at once and grouped results by kind.
+  void _openSearch(QuranReaderProvider readerProvider) {
+    final SearchResultKind scope =
+        readerProvider.isAyahSheetOpen &&
+            readerProvider.activeStudyTab == StudyTab.tafsir
+        ? SearchResultKind.tafsir
+        : SearchResultKind.ayahText;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => SearchScreen(
+          scope: scope,
           searchRepository: _searchRepository,
           quranRepository: _repository,
           onResultTap: (ayahKey) {
@@ -258,11 +272,13 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
                 ),
                 // Symmetric top-right entry point to [SearchScreen] — a
                 // second, deliberate exception to "no permanent chrome"
-                // alongside the Saved Items button above, same reasoning:
-                // search across every ayah/tafsir needs one fixed way in.
+                // alongside the Saved Items button above: one fixed way in,
+                // scoped by whatever's currently open (see _openSearch).
                 // Same opaque-chip treatment from the start (not a plain
                 // transparent IconButton) so it doesn't repeat that bug on
-                // a surah's first page.
+                // a surah's first page. Tooltip reflects the resolved scope
+                // so it's clear before tapping which thing will be
+                // searched.
                 Positioned(
                   top: 8,
                   right: 8,
@@ -271,8 +287,13 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
                     shape: const CircleBorder(),
                     elevation: 2,
                     child: IconButton(
-                      tooltip: 'بحث',
-                      onPressed: _openSearch,
+                      tooltip:
+                          readerProvider.isAyahSheetOpen &&
+                              readerProvider.activeStudyTab ==
+                                  StudyTab.tafsir
+                          ? 'بحث في التفسير'
+                          : 'بحث في المصحف',
+                      onPressed: () => _openSearch(readerProvider),
                       icon: const Icon(Icons.search, color: mushafInkColor),
                     ),
                   ),

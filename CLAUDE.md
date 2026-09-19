@@ -173,44 +173,68 @@ are kept below. Git history has the full story if needed.
     bug, not suspected app code; `SqliteNoteRepository` uses the identical
     proven pattern as the bookmark/reading-state repositories).
 - [x] **Search module** (`lib/features/search`, spec §17's architecture
-  tree — no numbered spec section of its own; built per the user's
-  explicit request: "البحث في نص الآيات والتفسير مع بعض"). `SearchScreen`
-  is opened from a second permanent corner button (top-right,
-  `Icons.search`, same opaque-chip treatment as the Saved Items button so
-  it doesn't blend into the surah-header banner) — the reader's third
-  deliberate exception to "no permanent chrome". `SearchRepository` has
-  two separate methods (`searchAyahText`/`searchTafsir`, not one merged
-  method) since the UI groups results by kind; both are plain SQL `LIKE`
-  substring matches with **no normalization/diacritic-folding** (rule #1:
-  the query only matches text written with the same diacritics as the
-  canonical Uthmani script/tafsir prose — same MVP scope as
+  tree — no numbered spec section of its own). `SearchScreen` is opened
+  from a second permanent corner button (top-right, `Icons.search`, same
+  opaque-chip treatment as the Saved Items button so it doesn't blend
+  into the surah-header banner) — the reader's third deliberate exception
+  to "no permanent chrome". `SearchRepository` has two separate methods
+  (`searchAyahText`/`searchTafsir`), both plain SQL `LIKE` substring
+  matches with **no normalization/diacritic-folding** (rule #1: the query
+  only matches text written with the same diacritics as the canonical
+  Uthmani script/tafsir prose — same MVP scope as
   `TafsirRepository.search`). `searchTafsir` spans every tafsir source at
   once (unlike the single-source-scoped search already on `TafsirScreen`)
   and tags each hit with its source name so a "الإعراب الميسر" hit isn't
   mistaken for general commentary. Selecting a result reuses the reader's
-  existing `_jumpToAyah`. As part of this, the Ayah Context Sheet's
-  Actions Row dropped its Tafsir button (kept only
-  Note/Bookmark/Continue) — redundant once "التفسير" already sits as a
-  first-class study tab, `tafsir_action_button.dart` deleted.
-  **Verified on-device with real typed Arabic input** (2026-09-19, after
-  installing ADBKeyboard — see "Known environment issues" below): typed
-  "الرحمن" into `SearchScreen`, got 273 correctly-grouped/labeled tafsir
-  hits (الفاتحة ١ • الإعراب الميسر, البقرة ٢٥ • تفسير السعدي, etc.), zero
-  ayah-text hits (**correct**, not a bug — the query has no diacritics,
-  so it can't substring-match diacritized Uthmani script, exactly per
-  rule #1's no-normalization design). Tapped a result → correctly jumped
-  to 1:1 and opened the Ayah Context Sheet with real Ibn Kathir content
-  (opens on the sheet's default التفسير tab regardless of which source
-  the hit came from — `onResultTap` only carries `ayahKey`, not the
-  matched source; acceptable MVP scope, not wired to auto-select a tab).
-  Also confirmed: search icon opens `SearchScreen` correctly (matches
-  Saved Items button's opaque-chip fix, no banner blending); the arrow
-  glyph in the app bar is Flutter's auto-inserted **back** button
-  (mirrored for RTL, not a submit control — the real submit is the
-  leading magnifying-glass `IconButton`, which sits on the visual left
-  because `actions` mirrors in RTL); the Ayah Context Sheet's Actions Row
-  renders Note/Bookmark/Continue only, no gap left by the removed Tafsir
-  button.
+  existing `_jumpToAyah`.
+  **`SearchScreen` is single-scope per instance, not a combined
+  "search everything and group by kind" screen** — an earlier version did
+  that (one screen searching both at once, results grouped under two
+  headers); the user explicitly rejected it and asked for context-aware
+  scoping instead: search the open Mushaf page's ayah text by default,
+  but search tafsir instead whenever the Ayah Context Sheet's التفسير tab
+  is the one currently open. `SearchScreen` itself stays unaware of *why*
+  a scope was picked — it just takes a required `scope: SearchResultKind`
+  constructor param (reusing the existing `ayahText`/`tafsir` enum rather
+  than adding a duplicate one) and calls only the matching repository
+  method, with the hint text/empty-state message worded per scope so
+  it's unambiguous which thing is being searched. The scope decision
+  itself lives in `MushafReaderScreen._openSearch`, which already owns
+  `QuranReaderProvider` (the reader's own state — `isAyahSheetOpen` +
+  `activeStudyTab == StudyTab.tafsir`) — chosen there specifically so
+  `search` never has to import or read `quran_reader`'s presentation
+  state; the composition root (`MushafReaderScreen`, which already wires
+  together bookmarks/notes/tafsir/audio/user_library/search
+  repositories) makes the call, consistent with every other cross-feature
+  wiring in this file, not a new pattern. The corner button's tooltip
+  itself reflects the resolved scope ("بحث في المصحف" / "بحث في
+  التفسير") so it's clear before tapping which thing will be searched.
+  As part of adding this module, the Ayah Context Sheet's Actions Row
+  dropped its Tafsir button (kept only Note/Bookmark/Continue) —
+  redundant once "التفسير" already sits as a first-class study tab,
+  `tafsir_action_button.dart` deleted. That was the *only* thing that
+  ever pushed the separate full-screen `TafsirScreen`
+  (`lib/features/tafsir/presentation/tafsir_screen.dart`) — it's now
+  unreachable/orphaned dead code (still analyzes clean since nothing
+  references it incorrectly, just nothing references it at all). Leaving
+  it in place for now since it's not otherwise in the way; worth either
+  deleting it or wiring a new entry point to it in a future prompt rather
+  than letting it silently bit-rot.
+  **Verified on-device with real typed Arabic input** (2026-09-19, via
+  ADBKeyboard — see "Known environment issues" below): with the sheet
+  closed, search hint reads "ابحثي في آيات المصحف..." and a typed query
+  returns only ayah-text hits; with the sheet open on التفسير, hint reads
+  "ابحثي في التفسير..." and the same query ("الرحمن") returns 273
+  tafsir-only hits, correctly labeled, no ayah-text section leaking in
+  either direction. Tapping a result correctly jumps to that ayah and
+  opens the Ayah Context Sheet with real content (always opens on the
+  sheet's default التفسير tab regardless of which source the hit came
+  from — `onResultTap` only carries `ayahKey`, not the matched source;
+  acceptable MVP scope, not wired to auto-select a tab). Also confirmed:
+  the arrow glyph in the app bar is Flutter's auto-inserted **back**
+  button (mirrored for RTL, not a submit control — the real submit is
+  the leading magnifying-glass `IconButton`, which sits on the visual
+  left because `actions` mirrors in RTL).
 - [ ] Phase 3 remainder — performance pass, validation suite (not started).
 
 ## Known environment issues (this sandboxed dev machine)
