@@ -192,18 +192,25 @@ are kept below. Git history has the full story if needed.
   Actions Row dropped its Tafsir button (kept only
   Note/Bookmark/Continue) — redundant once "التفسير" already sits as a
   first-class study tab, `tafsir_action_button.dart` deleted.
-  **Verified on-device**: search icon opens `SearchScreen` correctly
-  (matches Saved Items button's opaque-chip fix, no banner blending);
-  back navigation returns to the reader without crashing; the Ayah
-  Context Sheet's Actions Row renders Note/Bookmark/Continue only, no gap
-  left by the removed Tafsir button. Both `LIKE` queries
-  (`searchAyahText`/`searchTafsir`) verified directly against the
-  on-device `quran_app.db` (pulled via `adb exec-out run-as`) using a
-  substring taken straight from the stored data itself, since this
-  environment's `adb shell input text` cannot type Arabic (throws
-  `NullPointerException` — a different limitation from the known
-  TextField-focus crash below, device stayed alive) — same
-  direct-SQLite-proof pattern already established for the Notes feature.
+  **Verified on-device with real typed Arabic input** (2026-09-19, after
+  installing ADBKeyboard — see "Known environment issues" below): typed
+  "الرحمن" into `SearchScreen`, got 273 correctly-grouped/labeled tafsir
+  hits (الفاتحة ١ • الإعراب الميسر, البقرة ٢٥ • تفسير السعدي, etc.), zero
+  ayah-text hits (**correct**, not a bug — the query has no diacritics,
+  so it can't substring-match diacritized Uthmani script, exactly per
+  rule #1's no-normalization design). Tapped a result → correctly jumped
+  to 1:1 and opened the Ayah Context Sheet with real Ibn Kathir content
+  (opens on the sheet's default التفسير tab regardless of which source
+  the hit came from — `onResultTap` only carries `ayahKey`, not the
+  matched source; acceptable MVP scope, not wired to auto-select a tab).
+  Also confirmed: search icon opens `SearchScreen` correctly (matches
+  Saved Items button's opaque-chip fix, no banner blending); the arrow
+  glyph in the app bar is Flutter's auto-inserted **back** button
+  (mirrored for RTL, not a submit control — the real submit is the
+  leading magnifying-glass `IconButton`, which sits on the visual left
+  because `actions` mirrors in RTL); the Ayah Context Sheet's Actions Row
+  renders Note/Bookmark/Continue only, no gap left by the removed Tafsir
+  button.
 - [ ] Phase 3 remainder — performance pass, validation suite (not started).
 
 ## Known environment issues (this sandboxed dev machine)
@@ -225,13 +232,31 @@ already cost a full debugging pass once:
 - **`adb shell input text` cannot type Arabic/non-Latin text** — throws
   `java.lang.NullPointerException` in `InputShellCommand.sendText`
   (`KeyCharacterMap` can't map non-Latin chars to virtual key events).
-  Device stays alive; this is an `adb` limitation, not an app crash. To
-  verify a search/query feature that needs Arabic input, don't try to
-  type it — pull the on-device db and run the same query with a substring
-  taken straight from the stored data itself (`SELECT ... WHERE col LIKE
-  '%' || (SELECT substr(...) FROM ...) || '%'`), which sidesteps typing
-  entirely while still proving the real `LIKE`/query logic against real
-  data.
+  Device stays alive; this is an `adb` limitation, not an app crash. Two
+  workarounds, in order of preference:
+  1. **ADBKeyboard IME** (now installed on this AVD, 2026-09-19,
+     `senzhk/ADBKeyBoard` — a ~17KB open-source IME whose only job is
+     accepting Unicode over `adb`, from `https://raw.githubusercontent.com
+     /senzhk/ADBKeyBoard/master/ADBKeyboard.apk`): once installed
+     (`adb install ADBKeyboard.apk`) and selected as the active IME
+     (`adb shell ime enable com.android.adbkeyboard/.AdbIME` then
+     `adb shell ime set com.android.adbkeyboard/.AdbIME`), any focused
+     text field accepts real Arabic via
+     `adb shell am broadcast -a ADB_INPUT_TEXT --es msg 'عربي'` — types
+     instantly, no on-screen keyboard needed. Verified end-to-end typing
+     "الرحمن" into `SearchScreen` and getting real, correctly-grouped
+     results (see Search module entry above). Switch back to
+     `com.android.inputmethod.latin/.LatinIME` when done if a later
+     verification pass needs the stock keyboard's own behavior.
+  2. **Direct SQLite proof** (no install needed, use when ADBKeyboard
+     isn't set up yet or the feature under test doesn't route through a
+     visible `TextField`): pull the on-device db and run the same query
+     with a substring taken straight from the stored data itself
+     (`SELECT ... WHERE col LIKE '%' || (SELECT substr(...) FROM ...) ||
+     '%'`) — sidesteps typing entirely while still proving the real
+     `LIKE`/query logic against real data. This is how the Notes feature
+     (Prompt 14) and this Search module's SQL layer were first verified,
+     before ADBKeyboard existed on this AVD.
 - **`adb input tap`/`swipe` can degrade or the whole emulator process can
   vanish mid-session**, unrelated to the app. Always run `adb devices`
   after a tap/swipe to confirm the device is still there before trusting a
