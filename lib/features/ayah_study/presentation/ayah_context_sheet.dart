@@ -20,7 +20,6 @@ import '../../tafsir/domain/tafsir_entry.dart';
 import '../../tafsir/domain/tafsir_repository.dart';
 import '../../tafsir/domain/tafsir_source.dart';
 import '../../tafsir/presentation/grammar_tab_content.dart';
-import '../../tafsir/presentation/tafsir_action_button.dart';
 import '../../tafsir/presentation/tafsir_html_text.dart';
 
 /// The Ayah Context Sheet (spec §10): opens under
@@ -311,8 +310,6 @@ class _AyahSheetBody extends StatelessWidget {
             ayahKey: ayahKey,
             surahId: data.surah.surahId,
             ayahNumber: data.ayahNumber,
-            repository: repository,
-            tafsirRepository: tafsirRepository,
           ),
           const SizedBox(height: 4),
           AudioPlaybackRow(ayahKey: ayahKey),
@@ -662,10 +659,13 @@ class _TafsirSourceContent extends StatelessWidget {
   }
 }
 
-/// The sheet's Tafsir/Note/Bookmark/Continue row (spec §10's Actions row).
-/// Each action is owned and implemented by its own feature — this widget
-/// only composes them side by side, it holds no bookmark/note/last-read
-/// logic of its own (that used to live here directly, which was a Clean
+/// The sheet's Note/Bookmark/Continue row (spec §10's Actions row, minus
+/// Tafsir — removed 2026-09-18 per the user's explicit request, since
+/// "التفسير" already sits as a first-class study tab next to "الإعراب"
+/// and duplicating it as a bottom action too was redundant). Each action
+/// is owned and implemented by its own feature — this widget only
+/// composes them side by side, it holds no bookmark/note/last-read logic
+/// of its own (that used to live here directly, which was a Clean
 /// Architecture violation: `ayah_study` reaching into other features'
 /// concerns instead of depending on their public presentation widgets).
 class _ActionsRow extends StatelessWidget {
@@ -673,25 +673,16 @@ class _ActionsRow extends StatelessWidget {
     required this.ayahKey,
     required this.surahId,
     required this.ayahNumber,
-    required this.repository,
-    required this.tafsirRepository,
   });
 
   final String ayahKey;
   final int surahId;
   final int ayahNumber;
-  final QuranRepository repository;
-  final TafsirRepository tafsirRepository;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        TafsirActionButton(
-          ayahKey: ayahKey,
-          quranRepository: repository,
-          tafsirRepository: tafsirRepository,
-        ),
         NoteActionButton(ayahKey: ayahKey),
         BookmarkActionButton(ayahKey: ayahKey),
         MarkAsLastReadButton(

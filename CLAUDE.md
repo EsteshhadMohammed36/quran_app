@@ -172,6 +172,38 @@ are kept below. Git history has the full story if needed.
     note text — see "Known environment issues" below (this is an emulator
     bug, not suspected app code; `SqliteNoteRepository` uses the identical
     proven pattern as the bookmark/reading-state repositories).
+- [x] **Search module** (`lib/features/search`, spec §17's architecture
+  tree — no numbered spec section of its own; built per the user's
+  explicit request: "البحث في نص الآيات والتفسير مع بعض"). `SearchScreen`
+  is opened from a second permanent corner button (top-right,
+  `Icons.search`, same opaque-chip treatment as the Saved Items button so
+  it doesn't blend into the surah-header banner) — the reader's third
+  deliberate exception to "no permanent chrome". `SearchRepository` has
+  two separate methods (`searchAyahText`/`searchTafsir`, not one merged
+  method) since the UI groups results by kind; both are plain SQL `LIKE`
+  substring matches with **no normalization/diacritic-folding** (rule #1:
+  the query only matches text written with the same diacritics as the
+  canonical Uthmani script/tafsir prose — same MVP scope as
+  `TafsirRepository.search`). `searchTafsir` spans every tafsir source at
+  once (unlike the single-source-scoped search already on `TafsirScreen`)
+  and tags each hit with its source name so a "الإعراب الميسر" hit isn't
+  mistaken for general commentary. Selecting a result reuses the reader's
+  existing `_jumpToAyah`. As part of this, the Ayah Context Sheet's
+  Actions Row dropped its Tafsir button (kept only
+  Note/Bookmark/Continue) — redundant once "التفسير" already sits as a
+  first-class study tab, `tafsir_action_button.dart` deleted.
+  **Verified on-device**: search icon opens `SearchScreen` correctly
+  (matches Saved Items button's opaque-chip fix, no banner blending);
+  back navigation returns to the reader without crashing; the Ayah
+  Context Sheet's Actions Row renders Note/Bookmark/Continue only, no gap
+  left by the removed Tafsir button. Both `LIKE` queries
+  (`searchAyahText`/`searchTafsir`) verified directly against the
+  on-device `quran_app.db` (pulled via `adb exec-out run-as`) using a
+  substring taken straight from the stored data itself, since this
+  environment's `adb shell input text` cannot type Arabic (throws
+  `NullPointerException` — a different limitation from the known
+  TextField-focus crash below, device stayed alive) — same
+  direct-SQLite-proof pattern already established for the Notes feature.
 - [ ] Phase 3 remainder — performance pass, validation suite (not started).
 
 ## Known environment issues (this sandboxed dev machine)
@@ -185,6 +217,21 @@ already cost a full debugging pass once:
   config), unaffected by disabling all animations. Every *other* tap/swipe
   interaction on the same screens worked fine. If a UI feature needs text
   entry, expect this crash and verify via direct SQLite proof instead.
+  **Not universal**: `SearchScreen`'s `autofocus: true` `TextField` (a
+  plain `Scaffold` app-bar field, not `NoteEditorSheet`'s modal bottom
+  sheet) focused fine with the keyboard shown, no crash — so the trigger
+  is narrower than "any `TextField` focus"; still expect it might recur
+  and verify via direct SQLite proof as a fallback.
+- **`adb shell input text` cannot type Arabic/non-Latin text** — throws
+  `java.lang.NullPointerException` in `InputShellCommand.sendText`
+  (`KeyCharacterMap` can't map non-Latin chars to virtual key events).
+  Device stays alive; this is an `adb` limitation, not an app crash. To
+  verify a search/query feature that needs Arabic input, don't try to
+  type it — pull the on-device db and run the same query with a substring
+  taken straight from the stored data itself (`SELECT ... WHERE col LIKE
+  '%' || (SELECT substr(...) FROM ...) || '%'`), which sidesteps typing
+  entirely while still proving the real `LIKE`/query logic against real
+  data.
 - **`adb input tap`/`swipe` can degrade or the whole emulator process can
   vanish mid-session**, unrelated to the app. Always run `adb devices`
   after a tap/swipe to confirm the device is still there before trusting a

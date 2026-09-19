@@ -14,6 +14,9 @@ import '../../morphology/data/sqlite_morphology_repository.dart';
 import '../../morphology/domain/morphology_repository.dart';
 import '../../notes/data/sqlite_note_repository.dart';
 import '../../notes/domain/note_repository.dart';
+import '../../search/data/sqlite_search_repository.dart';
+import '../../search/domain/search_repository.dart';
+import '../../search/presentation/search_screen.dart';
 import '../../tafsir/data/sqlite_tafsir_repository.dart';
 import '../../tafsir/domain/tafsir_repository.dart';
 import '../../user_library/presentation/saved_items_screen.dart';
@@ -61,6 +64,7 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
   final NoteRepository _noteRepository = SqliteNoteRepository();
   final ReadingStateRepository _readingStateRepository =
       SqliteReadingStateRepository();
+  final SearchRepository _searchRepository = SqliteSearchRepository();
   late final UserLibraryProvider _userLibraryProvider = UserLibraryProvider(
     bookmarkRepository: _bookmarkRepository,
     noteRepository: _noteRepository,
@@ -171,6 +175,21 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
     );
   }
 
+  void _openSearch() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => SearchScreen(
+          searchRepository: _searchRepository,
+          quranRepository: _repository,
+          onResultTap: (ayahKey) {
+            Navigator.of(context).pop();
+            _jumpToAyah(ayahKey);
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final initError = _initError;
@@ -234,6 +253,27 @@ class _MushafReaderScreenState extends State<MushafReaderScreen> {
                         Icons.bookmarks_outlined,
                         color: mushafInkColor,
                       ),
+                    ),
+                  ),
+                ),
+                // Symmetric top-right entry point to [SearchScreen] — a
+                // second, deliberate exception to "no permanent chrome"
+                // alongside the Saved Items button above, same reasoning:
+                // search across every ayah/tafsir needs one fixed way in.
+                // Same opaque-chip treatment from the start (not a plain
+                // transparent IconButton) so it doesn't repeat that bug on
+                // a surah's first page.
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Material(
+                    color: mushafPageColor,
+                    shape: const CircleBorder(),
+                    elevation: 2,
+                    child: IconButton(
+                      tooltip: 'بحث',
+                      onPressed: _openSearch,
+                      icon: const Icon(Icons.search, color: mushafInkColor),
                     ),
                   ),
                 ),
