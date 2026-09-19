@@ -384,14 +384,14 @@ class _Header extends StatelessWidget {
             ),
           ),
         ),
-        const Tooltip(
-          message: 'مشاركة (قريبًا)',
-          child: IconButton(
-            onPressed: null,
-            icon: Icon(Icons.share_outlined),
-            color: mushafInkColor,
-          ),
-        ),
+        // const Tooltip(
+        //   message: 'مشاركة (قريبًا)',
+        //   child: IconButton(
+        //     onPressed: null,
+        //     icon: Icon(Icons.share_outlined),
+        //     color: mushafInkColor,
+        //   ),
+        // ),
         Tooltip(
           message: 'إغلاق',
           child: IconButton(
