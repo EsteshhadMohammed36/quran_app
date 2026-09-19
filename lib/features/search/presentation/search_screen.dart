@@ -80,8 +80,8 @@ class _SearchScreenState extends State<SearchScreen> {
             style: const TextStyle(color: mushafInkColor),
             decoration: InputDecoration(
               hintText: _isTafsirScope
-                  ? 'ابحثي في التفسير...'
-                  : 'ابحثي في آيات المصحف...',
+                  ? 'ابحث في التفسير...'
+                  : 'ابحث في آيات المصحف...',
               border: InputBorder.none,
             ),
           ),
@@ -99,8 +99,8 @@ class _SearchScreenState extends State<SearchScreen> {
     if (future == null) {
       return _MessageState(
         message: _isTafsirScope
-            ? 'اكتبي كلمة أو عبارة للبحث في التفسير.'
-            : 'اكتبي كلمة أو عبارة للبحث في آيات المصحف.',
+            ? 'اكتب كلمة أو عبارة للبحث في التفسير.'
+            : 'اكتب كلمة أو عبارة للبحث في آيات المصحف.',
       );
     }
     return FutureBuilder<List<SearchResult>>(

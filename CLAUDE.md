@@ -434,7 +434,95 @@ are kept below. Git history has the full story if needed.
   `assets/database/quran.db`: all 19 checks pass, confirming the actual
   bundled database is sound per every spec §24 requirement as of this date.
   `flutter analyze` clean.
-- [ ] Prompt 17 — Final acceptance tests (spec §26, not started).
+- [x] **Prompt 17 — Final acceptance tests** (`tool/run_acceptance_tests.dart` +
+  `test/acceptance_selection_test.dart`, spec §26, 2026-09-19). spec §26 is
+  a 15-row table of mandatory test cases. Mapped every row to how it's
+  actually verified, then built automation for the rows that were still
+  only "verified once, informally, in an earlier prompt's on-device pass"
+  rather than having a standalone, re-runnable check:
+  - **`tool/run_acceptance_tests.dart`** (11 checks, same `sqlite3` CLI /
+    `--db=path` convention as `tool/validate_quran_db.dart` — read-only
+    against the shipped `assets/database/quran.db`, except the one user-data
+    check, which mutates a throwaway scratch *copy*, never the committed
+    asset) covers: First page, Mid page, Boundary ayah, Page boundary,
+    Surah header, Tafsir (both the grouped-member and standalone
+    resolution paths), Morphology, Audio, Audio sync, and Bookmark/Note/
+    Last-read (a real insert-then-read round trip using each repository's
+    exact SQL, on the scratch copy — stronger than a pure schema check,
+    complementing rather than replacing Prompt 14's on-device UI proof of
+    the same three features).
+  - **Two rows this script *can't* prove, by construction, were caught
+    while building it and are exactly why "Boundary ayah"/"Page boundary"
+    exist as separate spec rows at all**: an early version assumed page 1
+    would carry its own `line_type = 'basmallah'` row and that some ayah
+    somewhere would be split across two `page_number`s — both failed
+    against the real data on the first run. Investigated with direct SQL
+    before touching the check, not assumed to be app bugs: (1) Al-Fatiha's
+    Bismillah *is* ayah 1:1 itself, so it's already a normal `'ayah'` line
+    on page 1 — the special `'basmallah'` line_type is only for the other
+    112 surahs, where Bismillah isn't itself ayah 1 (matches
+    `qpc_v2_fonts.dart`'s existing comment about reusing 1:1's real words
+    for those lines); (2) confirmed across all 604 pages that the standard
+    Madinah-layout Mushaf is typeset so every page break lands exactly on
+    an ayah boundary — no ayah is ever split across two pages anywhere in
+    the shipped layout (only *lines within* a page split ayahs, which is
+    what "Boundary ayah" already covers). Rewrote "Page boundary" to check
+    the real, always-satisfiable claim instead: across all 603 page
+    transitions, the last ayah on page N and the first ayah on page N+1
+    always resolve to the correct adjacent ayah, never bleeding into each
+    other or duplicating. Both fixes are documented inline in the script
+    itself so a future run isn't re-confused by the same false assumption.
+  - **`test/acceptance_selection_test.dart`** (5 tests) covers "Selection"
+    and "Selection switch" — the two spec §26 rows that are pure app-state
+    claims with no SQL truth to check (`QuranReaderProvider.selectWord` is
+    their entire implementation): tapping any word (not just an ayah's
+    first word) resolves the whole parent ayah; tapping a second word
+    inside the *same* already-selected ayah is a no-op on the selection;
+    switching to a *different* ayah updates the selection without
+    resetting unrelated state (`activeStudyTab` survives a plain ayah
+    switch, per spec §9.1's "Selected ayah changes in place"); repeated
+    switches across four widely separated ayahs never leave a stale
+    selection; an outside tap (`clearSelection`) returns to spec §9.1's
+    "Idle" state exactly.
+  - **Rows deliberately left to prior on-device verification, not redone
+    here**: First page/Mid page *visual* fidelity, Audio actually
+    audible, and Bookmark/Note/Last-read *UI* persistence were already
+    confirmed on-device in Phase 0 and Prompt 14 respectively (see those
+    entries above) — this prompt's job was closing the gap where a spec
+    §26 row had *no* standalone repeatable check at all, not re-doing
+    manual passes that already exist. **Offline** (spec §26's last row)
+    has no automated check and was not re-verified on-device this prompt
+    (would need a fresh emulator boot with networking disabled) — still
+    open, see "Known gaps" below.
+  - **Verified**: `dart run tool/run_acceptance_tests.dart` — 11/11 pass
+    against the real shipped `quran.db`. `flutter test` — all 8 tests pass
+    (5 new + the 2 pre-existing files). `flutter analyze` clean (only a
+    pre-existing unrelated warning in `tool/ingest_quran_data.dart`).
+
+  **Gaps found against spec.md while auditing for this prompt** (asked for
+  explicitly, not app bugs introduced by this prompt — see chat for the
+  full answer): Juz/Hizb navigation (spec §3) was never built, only Surah
+  navigation; the Ayah Context Sheet's Share button (spec §10) is a
+  disabled stub (`onPressed: null`, "مشاركة (قريبًا)"); Tafsir's font-size
+  control (spec §11.1) was never implemented at any point, even in the
+  now-deleted `TafsirScreen` (its own `_fontSize` was a hardcoded
+  constant, not a real control); the now-deleted `TafsirScreen`'s
+  Previous/Next-ayah-within-tafsir navigation and per-source search
+  control (spec §11.1) had no replacement built into `TafsirTabContent`
+  when that screen was removed — `QuranReaderProvider.selectAyahKey`'s own
+  doc comment already flags this ("previously also used by the
+  now-removed ... Previous/Next ayah navigation ... but this method stayed
+  useful on its own for the restore-on-launch case"); font-load failure
+  (spec §20) doesn't fail clearly — `fontFamilyForPage` returning `null`
+  flows straight into `TextStyle(fontFamily: null)`, silently falling back
+  to the system font instead of erroring visibly in dev/QA (dormant today
+  since all 604 fonts are bundled, but the required guard doesn't exist);
+  database migration failure safety (spec §20) has no mechanism at all —
+  `AppDatabase._databaseVersion` is hardcoded at 1 with no `onUpgrade`, so
+  nothing yet guarantees "preserve previous DB until new DB passes
+  validation" whenever a future schema version bump happens; Offline mode
+  (spec §26's last row) has never been explicitly confirmed on a real
+  device with networking disabled.
 
 ## Known environment issues (this sandboxed dev machine)
 
@@ -504,6 +592,31 @@ already cost a full debugging pass once:
   (not `adb shell run-as`, which doesn't work for binary files here).
 - `path_provider_android` must stay pinned via `dependency_overrides` in
   `pubspec.yaml` (unrelated resolution issue on this setup).
+- **Audio played on the emulator but not on a real device installed from a
+  non-debug build** (2026-09-20): `android/app/src/main/AndroidManifest.xml`
+  never declared `android.permission.INTERNET`. Debug/profile runs (the
+  emulator's `flutter run`) get it for free from Flutter's own
+  `android/app/src/{debug,profile}/AndroidManifest.xml` template (added
+  there only for the VM service/hot reload) — masking the omission — but a
+  release-style install only merges the main manifest, so every streamed-
+  audio network request was silently blocked by Android's own permission
+  system. Fixed by adding the permission to the main manifest directly.
+- **Search returning "لا توجد نتائج" on a real device after installing an
+  otherwise-current build**: not a code bug — `AppDatabase._open()`
+  ([lib/core/database/app_database.dart](lib/core/database/app_database.dart))
+  only copies the bundled `assets/database/quran.db` into the device's
+  documents directory the *first* time the app ever runs on that device;
+  upgrading the installed APK never re-copies it. A device that had the app
+  installed before the 2026-09-19 Uthmani-text-source fix (commit
+  `5642ae1`) stays stuck on its old, broken local copy across every later
+  update. Matches the Search module's own note above about needing
+  `pm clear` on the emulator to force a re-copy during that fix's
+  verification. **Fix**: fully uninstall the app from the device (not just
+  reinstall over it) before installing a new build. No standing mechanism
+  detects "bundled asset changed, on-device copy is stale" — see Prompt
+  17's "database migration failure safety" gap above; a real fix would add
+  version/hash-based re-copy logic to `AppDatabase`, not just a one-time
+  manual workaround.
 
 ## Version control
 

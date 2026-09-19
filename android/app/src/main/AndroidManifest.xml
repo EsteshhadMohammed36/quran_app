@@ -1,4 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for streamed ayah audio playback (spec §14 — audio is
+         streamed via each ayah's audio_url at runtime, never bundled).
+         Debug/profile builds get this for free via
+         android/app/src/{debug,profile}/AndroidManifest.xml (Flutter's own
+         template, needed for the VM service/hot reload), which masks its
+         absence here on an emulator/dev run — a release build only merges
+         this main manifest, so without this line every network request
+         (including audio) is silently blocked by Android's permission
+         system on a real install. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="quran_app"
         android:name="${applicationName}"
